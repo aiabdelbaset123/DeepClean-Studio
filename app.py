@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-DeepClean Studio – تحويل النصوص الأكاديمية من نمط الذكاء الاصطناعي
-إلى نصوص ذات طابع بشري خبير مع حماية مطلقة للمعنى العلمي.
+DeepClean Studio – النسخة النهائية المُحسَّنة
+تحويل النصوص الأكاديمية من نمط الذكاء الاصطناعي إلى طابع بشري خبير
+مع حماية مطلقة للمعنى العلمي وتصدير إلى Word وتدقيق لغوي.
 """
 
 import math
@@ -25,9 +26,9 @@ from nltk.corpus import stopwords, wordnet
 from nltk.tokenize import sent_tokenize, word_tokenize
 from sentence_transformers import SentenceTransformer, util
 
-# ---------------------------------------------------------------------------
+# =============================================================================
 # إعداد موارد NLTK (تُحمَّل مرة واحدة وتُخزَّن مؤقتاً)
-# ---------------------------------------------------------------------------
+# =============================================================================
 @st.cache_resource
 def download_nltk_resources() -> None:
     """تنزيل جميع موارد NLTK الضرورية للتطبيق بأمان."""
@@ -46,16 +47,16 @@ def download_nltk_resources() -> None:
 
 download_nltk_resources()
 
-# ---------------------------------------------------------------------------
+# =============================================================================
 # النموذج الدلالي (Sentence‑BERT) – تحميل مرة واحدة
-# ---------------------------------------------------------------------------
+# =============================================================================
 @st.cache_resource
 def load_semantic_model() -> SentenceTransformer:
     return SentenceTransformer("all-MiniLM-L6-v2")
 
-# ---------------------------------------------------------------------------
+# =============================================================================
 # قاموس المرادفات الأكاديمية
-# ---------------------------------------------------------------------------
+# =============================================================================
 @st.cache_data
 def load_synonym_dictionary(filepath: str = "synonyms_academic.csv") -> pd.DataFrame:
     """تحميل قاموس المرادفات من ملف CSV أو إنشاء قاموس افتراضي عند غيابه."""
@@ -87,9 +88,10 @@ def load_synonym_dictionary(filepath: str = "synonyms_academic.csv") -> pd.DataF
         }
         return pd.DataFrame(default_data)
 
-# ---------------------------------------------------------------------------
+
+# =============================================================================
 # الكلاس الرئيسي – DeepCleanEngine
-# ---------------------------------------------------------------------------
+# =============================================================================
 class DeepCleanEngine:
     """
     محول النصوص الأكاديمية: ستة محركات تعمل معاً لتقليل قابلية الكشف الآلي
@@ -215,30 +217,6 @@ class DeepCleanEngine:
         if i != j:
             indices[i], indices[j] = indices[j], indices[i]
         return " ".join(sentences[k] for k in indices)
-
-    def _break_repetition(self, paragraphs: List[str]) -> List[str]:
-        """كسر تكرار توزيع أجزاء الكلام بين الفقرات المتجاورة."""
-        if len(paragraphs) < 2:
-            return paragraphs
-        pos_distributions = []
-        for para in paragraphs:
-            tokens = nltk.pos_tag(word_tokenize(para))
-            pos_counts = Counter(tag for _, tag in tokens)
-            pos_distributions.append(pos_counts)
-        new_paragraphs = paragraphs.copy()
-        for i in range(len(new_paragraphs) - 1):
-            d1, d2 = pos_distributions[i], pos_distributions[i + 1]
-            if not d1 or not d2:
-                continue
-            common = set(d1.keys()) & set(d2.keys())
-            union = set(d1.keys()) | set(d2.keys())
-            jaccard = len(common) / len(union) if union else 0
-            if jaccard > 0.8:
-                sents = sent_tokenize(new_paragraphs[i + 1])
-                if len(sents) > 2:
-                    random.shuffle(sents)
-                    new_paragraphs[i + 1] = " ".join(sents)
-        return new_paragraphs
 
     def _protect_references(self, text: str) -> Tuple[str, Dict[str, str]]:
         """استبدال المراجع والأرقام برموز مؤقتة لحمايتها من التعديل."""
@@ -411,7 +389,6 @@ class DeepCleanEngine:
             original_para = para_with_context
             modified = para_with_context
 
-            # المحركات 1-6
             current_stage += 1
             if progress_callback:
                 progress_callback("جاري التعديل الإحصائي (المحرك 1)...", current_stage / total_stages)
@@ -442,7 +419,6 @@ class DeepCleanEngine:
                 progress_callback("جاري التحقق من الاتساق (المحرك 6)...", current_stage / total_stages)
             modified = self.engine6_coherence_checker(original_para, modified)
 
-            # القفل الدلالي
             if not self.semantic_lock(original_para, modified):
                 modified = original_para
                 modified = self.engine1_perplexity_injector(modified)
@@ -468,7 +444,7 @@ class DeepCleanEngine:
 
 
 # =============================================================================
-# دوال إضافية للتصدير والتدقيق
+# دوال التصدير والتدقيق
 # =============================================================================
 def create_word_document(text: str, title: str = "DeepClean Studio Output") -> BytesIO:
     """إنشاء ملف Word منسق من النص المُحسَّن."""
@@ -505,7 +481,7 @@ def correct_grammar(text: str, lang: str = 'en-US') -> str:
         tool.close()
         return corrected
     except Exception:
-        return text  # في حال فشل الاتصال، نعيد النص كما هو
+        return text
 
 
 # =============================================================================
@@ -577,7 +553,7 @@ with st.sidebar:
     st.metric("TTR Ratio", f"{st.session_state.ttr:.2f}")
     st.warning("هذه مؤشرات محلية فقط ولا تضمن اجتياز أي كاشف خارجي.", icon="⚠️")
 
-    # زر تحميل النص المحسَّن كملف Word
+    # زر تحميل النتيجة كـ Word
     if "enhanced_text" in st.session_state and st.session_state.enhanced_text:
         word_file = create_word_document(st.session_state.enhanced_text)
         st.download_button(
@@ -610,7 +586,7 @@ def update_progress(stage: str, percent: float) -> None:
     progress_text.text(f"{stage} ({percent:.0%})")
     progress_bar.progress(min(percent, 1.0))
 
-# ------------------------- تنفيذ المعالجة -------------------------
+# ------------------------- تنفيذ المعالجة (بدون st.rerun) -------------------------
 if process_btn and text_input:
     st.session_state.perplexity = 0.0
     st.session_state.burstiness = 0.0
@@ -651,7 +627,6 @@ if process_btn and text_input:
     st.session_state.perplexity = perplexity
     st.session_state.burstiness = burstiness
     st.session_state.ttr = ttr
-    st.rerun()
 
 # ------------------------- عرض التغييرات -------------------------
 if show_changes and "enhanced_text" in st.session_state and text_input:
