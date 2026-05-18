@@ -17,7 +17,6 @@ import numpy as np
 import pandas as pd
 import pypdf
 import streamlit as st
-import textstat
 from nltk.corpus import stopwords, wordnet
 from nltk.tokenize import sent_tokenize, word_tokenize
 from sentence_transformers import SentenceTransformer, util
@@ -33,7 +32,7 @@ def download_nltk_resources() -> None:
         "tokenizers/punkt": "punkt",
         "corpora/wordnet": "wordnet",
         "corpora/stopwords": "stopwords",
-        "taggers/averaged_perceptron_tagger": "averaged_perceptron_tagger",
+        "taggers/averaged_perceptron_tagger_eng": "averaged_perceptron_tagger_eng",
     }
     for path, name in resources.items():
         try:
