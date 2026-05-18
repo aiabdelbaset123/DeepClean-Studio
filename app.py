@@ -22,6 +22,43 @@ from collections import Counter
 import docx2txt
 import pypdf
 
+# في بداية الملف بعد الاستيرادات
+# ... (الإعدادات والنماذج) ...
+
+# ---- الشريط الجانبي ----
+with st.sidebar:
+    st.header("⚙️ الإعدادات")
+    input_option = st.radio("مصدر النص:", ("رفع ملف", "لصق نص"))
+    uploaded_file = None
+    text_input = ""
+    if input_option == "رفع ملف":
+        uploaded_file = st.file_uploader("اختر ملفًا (txt, docx, pdf)", type=['txt', 'docx', 'pdf'])
+        if uploaded_file is not None:
+            # قراءة الملف حسب نوعه
+            try:
+                if uploaded_file.name.endswith('.txt'):
+                    text_input = uploaded_file.read().decode('utf-8')
+                elif uploaded_file.name.endswith('.docx'):
+                    text_input = docx2txt.process(uploaded_file)
+                elif uploaded_file.name.endswith('.pdf'):
+                    import pypdf  # تأكد من الاستيراد في الأعلى
+                    pdf_reader = pypdf.PdfReader(uploaded_file)
+                    text_input = ""
+                    for page in pdf_reader.pages:
+                        text_input += page.extract_text()
+            except Exception as e:
+                st.error(f"خطأ في قراءة الملف: {e}")
+    else:
+        # خيار لصق النص
+        text_input = st.text_area("ألصق النص الأكاديمي هنا:", height=200)
+
+    # بقية عناصر الشريط الجانبي (السلايدر، القائمة، الزر...)
+    ...
+
+# ---- بعد الشريط الجانبي، المنطقة الرئيسية ----
+col1, col2 = st.columns(2)
+...
+
 if uploaded_file is not None:
     try:
         if uploaded_file.name.endswith('.txt'):
