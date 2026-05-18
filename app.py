@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-DeepClean Studio – تحويل النصوص الأكاديمية المُنتجة بالذكاء الاصطناعي
+DeepClean Studio – تحويل النصوص الأكاديمية من نمط الذكاء الاصطناعي
 إلى نصوص ذات طابع بشري خبير مع حماية مطلقة للمعنى العلمي.
 """
 
@@ -9,6 +9,7 @@ import math
 import random
 import re
 from collections import Counter
+from io import BytesIO
 from typing import Dict, List, Optional, Tuple
 
 import docx2txt
@@ -17,13 +18,16 @@ import numpy as np
 import pandas as pd
 import pypdf
 import streamlit as st
+from docx import Document
+from docx.shared import Pt
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from nltk.corpus import stopwords, wordnet
 from nltk.tokenize import sent_tokenize, word_tokenize
 from sentence_transformers import SentenceTransformer, util
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # إعداد موارد NLTK (تُحمَّل مرة واحدة وتُخزَّن مؤقتاً)
-# =============================================================================
+# ---------------------------------------------------------------------------
 @st.cache_resource
 def download_nltk_resources() -> None:
     """تنزيل جميع موارد NLTK الضرورية للتطبيق بأمان."""
@@ -42,16 +46,16 @@ def download_nltk_resources() -> None:
 
 download_nltk_resources()
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # النموذج الدلالي (Sentence‑BERT) – تحميل مرة واحدة
-# =============================================================================
+# ---------------------------------------------------------------------------
 @st.cache_resource
 def load_semantic_model() -> SentenceTransformer:
     return SentenceTransformer("all-MiniLM-L6-v2")
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # قاموس المرادفات الأكاديمية
-# =============================================================================
+# ---------------------------------------------------------------------------
 @st.cache_data
 def load_synonym_dictionary(filepath: str = "synonyms_academic.csv") -> pd.DataFrame:
     """تحميل قاموس المرادفات من ملف CSV أو إنشاء قاموس افتراضي عند غيابه."""
@@ -83,10 +87,9 @@ def load_synonym_dictionary(filepath: str = "synonyms_academic.csv") -> pd.DataF
         }
         return pd.DataFrame(default_data)
 
-
-# =============================================================================
+# ---------------------------------------------------------------------------
 # الكلاس الرئيسي – DeepCleanEngine
-# =============================================================================
+# ---------------------------------------------------------------------------
 class DeepCleanEngine:
     """
     محول النصوص الأكاديمية: ستة محركات تعمل معاً لتقليل قابلية الكشف الآلي
@@ -290,11 +293,7 @@ class DeepCleanEngine:
     # المحركات الستة
     # ------------------------------------------------------------------
     def engine1_perplexity_injector(self, text: str) -> str:
-        """
-        محقون الحيرة (Perplexity Injector):
-        - استبدال الكلمات المتوقعة إحصائياً بمرادفات أكاديمية.
-        - إضافة تحوط (hedging) للنصوص شديدة الجزم.
-        """
+        """محقون الحيرة (Perplexity Injector)."""
         sentences = sent_tokenize(text)
         new_sentences = []
         for sent in sentences:
@@ -309,11 +308,7 @@ class DeepCleanEngine:
         return self._add_hedging(modified)
 
     def engine2_burstiness_synthesizer(self, text: str) -> str:
-        """
-        مركب التدافع (Burstiness Synthesizer):
-        - إعادة توزيع أطوال الجمل وفق توزيع مرجعي بشري.
-        - منع تطابق طول جملتين متتاليتين (±2 كلمة).
-        """
+        """مركب التدافع (Burstiness Synthesizer)."""
         sentences = sent_tokenize(text)
         if len(sentences) < 2:
             return text
@@ -334,20 +329,12 @@ class DeepCleanEngine:
         return " ".join(new_sentences)
 
     def engine3_stylistic_fingerprint_forger(self, text: str) -> str:
-        """
-        مزور البصمة الأسلوبية:
-        - تنويع علامات الترقيم وبدايات الجمل.
-        - إضافة لمسة شخصية (سؤال بلاغي) بشكل معتدل.
-        """
+        """مزور البصمة الأسلوبية."""
         text = self._vary_sentence_beginnings(text)
         return self._add_rhetorical_question(text)
 
     def engine4_semantic_deepener(self, text: str) -> str:
-        """
-        معمق الدلالة (Semantic Deepener):
-        - استبدال أدوات الربط العامة بروابط سببية/تناقضية أكثر تحديداً.
-        - إعادة ترتيب منطق الفقرة لكشف العلاقات السببية (بدون إضافة معلومات جديدة).
-        """
+        """معمق الدلالة (Semantic Deepener)."""
         sentences = sent_tokenize(text)
         if len(sentences) < 2:
             return text
@@ -364,7 +351,6 @@ class DeepCleanEngine:
             else:
                 new_sent = sent
             new_sentences.append(new_sent)
-        # إعادة ترتيب عشوائي محافظ
         if len(new_sentences) >= 3 and random.random() < 0.2:
             indices = list(range(len(new_sentences)))
             i, j = random.sample(range(1, len(new_sentences)), 2)
@@ -373,18 +359,11 @@ class DeepCleanEngine:
         return " ".join(new_sentences)
 
     def engine5_watermark_distorter(self, text: str) -> str:
-        """
-        مشوش العلامات المائية:
-        - إعادة تشكيل هيكل الفقرة عشوائياً مع الحفاظ على التسلسل المنطقي.
-        - كسر تكرار توزيع أجزاء الكلام عبر الفقرات.
-        """
+        """مشوش العلامات المائية."""
         return self._distort_paragraph_structure(text)
 
     def engine6_coherence_checker(self, original: str, modified: str) -> str:
-        """
-        مدقق الاتساق المنطقي (Post‑Processing Coherence Checker):
-        - مقارنة أزمنة الأفعال بين الأصل والمعدَّل وإصلاح أي اختلال.
-        """
+        """مدقق الاتساق المنطقي (Post‑Processing Coherence Checker)."""
         orig_sents = sent_tokenize(original)
         mod_sents = sent_tokenize(modified)
         if len(orig_sents) != len(mod_sents):
@@ -409,18 +388,15 @@ class DeepCleanEngine:
     # خط الأنابيب الرئيسي
     # ------------------------------------------------------------------
     def run_pipeline(self, progress_callback=None) -> str:
-        """
-        تشغيل المحركات الستة بالتسلسل مع تطبيق طبقات الأمان والفحص الذاتي.
-        """
+        """تشغيل المحركات الستة بالتسلسل مع تطبيق طبقات الأمان والفحص الذاتي."""
         text = self.original_text
         protected_text, replacement_map = self._protect_references(text)
 
-        # تقسيم النص إلى فقرات
         paragraphs = protected_text.split("\n\n")
         paragraphs = [p.strip() for p in paragraphs if p.strip()]
 
         processed_paragraphs = []
-        context: List[str] = []                     # آخر 5 جمل من الفقرة السابقة
+        context: List[str] = []
         total_stages = len(paragraphs) * 7
         current_stage = 0
 
@@ -428,7 +404,6 @@ class DeepCleanEngine:
             if progress_callback:
                 progress_callback("جاري التقسيم والتحليل...", current_stage / total_stages)
 
-            # دمج السياق السابق مع الفقرة الحالية
             para_with_context = (" ".join(context) + " " + para) if context else para
             sentences = sent_tokenize(para)
             context = sentences[-5:] if len(sentences) >= 5 else sentences
@@ -436,43 +411,38 @@ class DeepCleanEngine:
             original_para = para_with_context
             modified = para_with_context
 
-            # المحرك 1 – محقون الحيرة
+            # المحركات 1-6
             current_stage += 1
             if progress_callback:
                 progress_callback("جاري التعديل الإحصائي (المحرك 1)...", current_stage / total_stages)
             modified = self.engine1_perplexity_injector(modified)
 
-            # المحرك 2 – مركب التدافع
             current_stage += 1
             if progress_callback:
                 progress_callback("جاري تعديل التدافع (المحرك 2)...", current_stage / total_stages)
             modified = self.engine2_burstiness_synthesizer(modified)
 
-            # المحرك 3 – مزور البصمة الأسلوبية
             current_stage += 1
             if progress_callback:
                 progress_callback("جاري تزوير البصمة الأسلوبية (المحرك 3)...", current_stage / total_stages)
             modified = self.engine3_stylistic_fingerprint_forger(modified)
 
-            # المحرك 4 – معمق الدلالة
             current_stage += 1
             if progress_callback:
                 progress_callback("جاري تعميق الدلالة (المحرك 4)...", current_stage / total_stages)
             modified = self.engine4_semantic_deepener(modified)
 
-            # المحرك 5 – مشوش العلامات المائية
             current_stage += 1
             if progress_callback:
                 progress_callback("جاري تشويش العلامات المائية (المحرك 5)...", current_stage / total_stages)
             modified = self.engine5_watermark_distorter(modified)
 
-            # المحرك 6 – مدقق الاتساق
             current_stage += 1
             if progress_callback:
                 progress_callback("جاري التحقق من الاتساق (المحرك 6)...", current_stage / total_stages)
             modified = self.engine6_coherence_checker(original_para, modified)
 
-            # القفل الدلالي – إعادة المحاولة عند فشل التحقق
+            # القفل الدلالي
             if not self.semantic_lock(original_para, modified):
                 modified = original_para
                 modified = self.engine1_perplexity_injector(modified)
@@ -483,7 +453,6 @@ class DeepCleanEngine:
         final_text = "\n\n".join(processed_paragraphs)
         final_text = self._restore_protected(final_text, replacement_map)
 
-        # مؤشر تطرف التدفق – تصحيح إضافي إن لزم
         all_sentences = sent_tokenize(final_text)
         lengths = [len(word_tokenize(s)) for s in all_sentences]
         if not self.check_flow_extremity(lengths):
@@ -499,6 +468,47 @@ class DeepCleanEngine:
 
 
 # =============================================================================
+# دوال إضافية للتصدير والتدقيق
+# =============================================================================
+def create_word_document(text: str, title: str = "DeepClean Studio Output") -> BytesIO:
+    """إنشاء ملف Word منسق من النص المُحسَّن."""
+    doc = Document()
+    style = doc.styles['Normal']
+    font = style.font
+    font.name = 'Arial'
+    font.size = Pt(12)
+
+    heading = doc.add_heading(title, level=1)
+    heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    for para in text.split('\n'):
+        if para.strip():
+            p = doc.add_paragraph(para.strip())
+            p.style.font.size = Pt(12)
+            p.paragraph_format.space_after = Pt(6)
+        else:
+            doc.add_paragraph()
+
+    file_stream = BytesIO()
+    doc.save(file_stream)
+    file_stream.seek(0)
+    return file_stream
+
+
+def correct_grammar(text: str, lang: str = 'en-US') -> str:
+    """تصحيح الأخطاء النحوية والإملائية باستخدام LanguageTool (الخادم العام)."""
+    try:
+        import language_tool_python
+        tool = language_tool_python.LanguageTool(lang, remote_server='https://api.languagetool.org/v2/')
+        matches = tool.check(text)
+        corrected = language_tool_python.utils.correct(text, matches)
+        tool.close()
+        return corrected
+    except Exception:
+        return text  # في حال فشل الاتصال، نعيد النص كما هو
+
+
+# =============================================================================
 # واجهة المستخدم – Streamlit
 # =============================================================================
 st.set_page_config(page_title="DeepClean Studio", layout="wide")
@@ -511,7 +521,7 @@ with st.sidebar:
     input_option = st.radio(
         "مصدر النص:",
         ("رفع ملف", "لصق نص"),
-        key="source_radio",
+        key="source_radio"
     )
 
     uploaded_file = None
@@ -521,7 +531,7 @@ with st.sidebar:
         uploaded_file = st.file_uploader(
             "اختر ملفًا (txt, docx, pdf)",
             type=["txt", "docx", "pdf"],
-            key="file_uploader",
+            key="file_uploader"
         )
         if uploaded_file is not None:
             try:
@@ -538,29 +548,22 @@ with st.sidebar:
         text_input = st.text_area(
             "ألصق النص الأكاديمي هنا:",
             height=200,
-            key="paste_area",
+            key="paste_area"
         )
 
     intensity = st.slider(
         "قوة التحويل",
         1, 5, 3,
-        help="1 = دقيق ومحافظ، 5 = تحول إبداعي",
+        help="1 = دقيق ومحافظ، 5 = تحول إبداعي"
     )
     domain = st.selectbox(
         "المجال الأكاديمي:",
         ("medical", "engineering", "humanities", "general"),
-        format_func=lambda x: {
-            "medical": "طبي",
-            "engineering": "هندسي",
-            "humanities": "علوم إنسانية",
-            "general": "عام",
-        }[x],
+        format_func=lambda x: {"medical": "طبي", "engineering": "هندسي",
+                               "humanities": "علوم إنسانية", "general": "عام"}[x]
     )
-    process_btn = st.button(
-        "🛡️ بدء التحويل الآمن",
-        type="primary",
-        use_container_width=True,
-    )
+    grammar_check = st.checkbox("تفعيل التدقيق اللغوي (لغة إنجليزية)")
+    process_btn = st.button("🛡️ بدء التحويل الآمن", type="primary", use_container_width=True)
     show_changes = st.checkbox("عرض التغييرات للمراجعة البشرية")
 
     st.markdown("---")
@@ -573,6 +576,16 @@ with st.sidebar:
     st.metric("Burstiness Score", f"{st.session_state.burstiness:.2f}")
     st.metric("TTR Ratio", f"{st.session_state.ttr:.2f}")
     st.warning("هذه مؤشرات محلية فقط ولا تضمن اجتياز أي كاشف خارجي.", icon="⚠️")
+
+    # زر تحميل النص المحسَّن كملف Word
+    if "enhanced_text" in st.session_state and st.session_state.enhanced_text:
+        word_file = create_word_document(st.session_state.enhanced_text)
+        st.download_button(
+            label="📥 تنزيل النص المحسَّن (Word)",
+            data=word_file,
+            file_name="deepclean_output.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
 
 # ------------------------- المنطقة الرئيسية -------------------------
 col1, col2 = st.columns(2)
@@ -589,7 +602,7 @@ with col2:
         st.text_area("", enhanced_text, height=400, key="enh_text_display")
         st.caption(f"عدد الكلمات: {len(enhanced_text.split())}")
 
-# ------------------------- شريط التقدم التفصيلي -------------------------
+# ------------------------- شريط التقدم -------------------------
 progress_bar = st.progress(0)
 progress_text = st.empty()
 
@@ -606,14 +619,16 @@ if process_btn and text_input:
     with st.spinner("جاري المعالجة..."):
         engine = DeepCleanEngine(domain=domain, intensity=intensity, text=text_input)
         enhanced_text = engine.run_pipeline(progress_callback=update_progress)
+        if grammar_check:
+            with st.spinner("جاري التدقيق اللغوي..."):
+                enhanced_text = correct_grammar(enhanced_text)
         st.session_state.enhanced_text = enhanced_text
 
-    # حساب المؤشرات المحلية
+    # حساب المؤشرات
     try:
         words_orig = word_tokenize(text_input.lower())
         words_enh = word_tokenize(enhanced_text.lower())
         freq_orig = nltk.FreqDist(words_orig)
-
         log_prob_sum = 0.0
         count = 0
         for word in words_enh:
@@ -642,7 +657,6 @@ if process_btn and text_input:
 if show_changes and "enhanced_text" in st.session_state and text_input:
     st.markdown("---")
     st.subheader("🔍 تفاصيل التغييرات")
-
     orig_words_set = set(word_tokenize(text_input.lower()))
     enh_words_set = set(word_tokenize(st.session_state.enhanced_text.lower()))
     replaced = [(w, "→ (مرادف)") for w in orig_words_set if w not in enh_words_set and w.isalpha()]
