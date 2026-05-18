@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-DeepClean Studio - النسخة النهائية المُحسَّنة والمُختبرة
+DeepClean Studio – النسخة النهائية المُحسَّنة والمُختبرة
 تحويل النصوص الأكاديمية من نمط الذكاء الاصطناعي إلى طابع بشري خبير
 مع تصدير إلى Word، تدقيق لغوي، وعرض تفصيلي للتغييرات.
 """
 
+# =============================================================================
+# الاستيرادات الأساسية (بدون استخدام Streamlit بعد)
+# =============================================================================
 import math
 import random
 import re
@@ -19,7 +22,6 @@ import nltk
 import numpy as np
 import pandas as pd
 import pypdf
-import streamlit as st
 from docx import Document
 from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -27,10 +29,17 @@ from nltk.tokenize import sent_tokenize, word_tokenize
 from sentence_transformers import SentenceTransformer, util
 
 # =============================================================================
-# إعداد موارد NLTK
+# أمر Streamlit الأول – ضبط الصفحة
+# =============================================================================
+import streamlit as st
+st.set_page_config(page_title="DeepClean Studio", layout="wide")
+
+# =============================================================================
+# دوال التخزين المؤقت (بعد set_page_config)
 # =============================================================================
 @st.cache_resource
 def download_nltk_resources() -> None:
+    """تنزيل جميع موارد NLTK الضرورية للتطبيق بأمان."""
     resources = {
         "tokenizers/punkt_tab": "punkt_tab",
         "tokenizers/punkt": "punkt",
@@ -46,18 +55,13 @@ def download_nltk_resources() -> None:
 
 download_nltk_resources()
 
-# =============================================================================
-# النموذج الدلالي
-# =============================================================================
 @st.cache_resource
 def load_semantic_model() -> SentenceTransformer:
     return SentenceTransformer("all-MiniLM-L6-v2")
 
-# =============================================================================
-# قاموس المرادفات
-# =============================================================================
 @st.cache_data
 def load_synonym_dictionary(filepath: str = "synonyms_academic.csv") -> pd.DataFrame:
+    """تحميل قاموس المرادفات من ملف CSV أو إنشاء قاموس افتراضي عند غيابه."""
     try:
         df = pd.read_csv(filepath, encoding="utf-8")
         if {"domain", "original", "replacement"}.issubset(df.columns):
@@ -80,8 +84,9 @@ def load_synonym_dictionary(filepath: str = "synonyms_academic.csv") -> pd.DataF
         }
         return pd.DataFrame(default_data)
 
+
 # =============================================================================
-# الكلاس الرئيسي
+# الكلاس الرئيسي – DeepCleanEngine
 # =============================================================================
 class DeepCleanEngine:
     def __init__(self, domain: str, intensity: int, text: str) -> None:
@@ -223,9 +228,6 @@ class DeepCleanEngine:
     def _remove_long_dashes(self, text: str) -> str:
         return text.replace("—", "; ").replace("–", ", ")
 
-    # ------------------------------------------------------------------
-    # المحركات الستة
-    # ------------------------------------------------------------------
     def engine1_perplexity_injector(self, text: str) -> str:
         sentences = sent_tokenize(text)
         new_sentences = []
@@ -442,6 +444,7 @@ def compute_metrics(original: str, enhanced: str):
     except Exception:
         return 0.0, 0.0, 0.0
 
+
 # =============================================================================
 # دالة المعالجة الأساسية (callback)
 # =============================================================================
@@ -456,7 +459,6 @@ def process_text_callback():
         text=st.session_state["text_input"]
     )
 
-    # لا نستخدم update_progress هنا لأنها تتطلب session_state
     enhanced = engine.run_pipeline()
 
     st.session_state.enhanced_text = enhanced
@@ -466,9 +468,8 @@ def process_text_callback():
 
 
 # =============================================================================
-# واجهة المستخدم – Streamlit
+# واجهة المستخدم – Streamlit (بعد set_page_config)
 # =============================================================================
-st.set_page_config(page_title="DeepClean Studio", layout="wide")
 st.title("🛡️ DeepClean Studio")
 st.markdown("تحويل النصوص الأكاديمية من نمط الذكاء الاصطناعي إلى طابع بشري خبير")
 
@@ -506,7 +507,6 @@ with st.sidebar:
     else:
         text_input = st.text_area("ألصق النص الأكاديمي هنا:", height=200, key="paste_area")
 
-    # حفظ النص المدخل في session_state
     if text_input:
         st.session_state.text_input = text_input
 
@@ -515,7 +515,6 @@ with st.sidebar:
                           format_func=lambda x: {"medical":"طبي","engineering":"هندسي","humanities":"علوم إنسانية","general":"عام"}[x],
                           key="domain")
 
-    # استخدام on_click لتجنب st.rerun()
     process_btn = st.button(
         "🛡️ بدء التحويل الآمن",
         type="primary",
@@ -532,7 +531,6 @@ with st.sidebar:
     st.metric("TTR Ratio", f"{st.session_state.ttr:.2f}")
     st.warning("هذه مؤشرات محلية فقط ولا تضمن اجتياز أي كاشف خارجي.", icon="⚠️")
 
-    # زر تحميل النتيجة كـ Word
     if st.session_state.enhanced_text:
         word_file = create_word_document(st.session_state.enhanced_text)
         st.download_button("📥 تنزيل النص المحسَّن (Word)", data=word_file,
