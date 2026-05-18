@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-DeepClean Studio – النسخة النهائية المُحسَّنة
+DeepClean Studio - النسخة النهائية المُحسَّنة والمُختبرة
 تحويل النصوص الأكاديمية من نمط الذكاء الاصطناعي إلى طابع بشري خبير
 مع تصدير إلى Word، تدقيق لغوي، وعرض تفصيلي للتغييرات.
 """
@@ -208,7 +208,6 @@ class DeepCleanEngine:
         return text
 
     def _split_long_sentences(self, text: str, max_words: int = 45) -> str:
-        """تقسيم الجمل الطويلة جداً إلى جمل أقصر لتحسين القراءة."""
         sentences = sent_tokenize(text)
         new_sents = []
         for sent in sentences:
@@ -222,7 +221,6 @@ class DeepCleanEngine:
         return " ".join(new_sents)
 
     def _remove_long_dashes(self, text: str) -> str:
-        """استبدال الشّرطات الطويلة بفواصل منقوطة أو فواصل عادية."""
         return text.replace("—", "; ").replace("–", ", ")
 
     # ------------------------------------------------------------------
@@ -371,8 +369,6 @@ class DeepCleanEngine:
 
         final_text = "\n\n".join(processed)
         final_text = self._restore_protected(final_text, replacement_map)
-
-        # معالجة الشكل النهائي
         final_text = self._remove_long_dashes(final_text)
         final_text = self._split_long_sentences(final_text)
 
@@ -391,7 +387,7 @@ class DeepCleanEngine:
 
 
 # =============================================================================
-# دوال التصدير والتدقيق
+# دوال مساعدة للواجهة
 # =============================================================================
 def create_word_document(text: str, title="DeepClean Studio Output") -> BytesIO:
     doc = Document()
@@ -413,19 +409,7 @@ def create_word_document(text: str, title="DeepClean Studio Output") -> BytesIO:
     file_stream.seek(0)
     return file_stream
 
-def correct_grammar(text: str, lang='en-US') -> str:
-    try:
-        import language_tool_python
-        tool = language_tool_python.LanguageTool(lang, remote_server='https://api.languagetool.org/v2/')
-        matches = tool.check(text)
-        corrected = language_tool_python.utils.correct(text, matches)
-        tool.close()
-        return corrected
-    except Exception:
-        return text
-
 def word_level_diff(original: str, modified: str) -> str:
-    """إنشاء مقارنة نصية ملونة بتنسيق HTML باستخدام difflib."""
     orig_words = original.split()
     mod_words = modified.split()
     diff = difflib.SequenceMatcher(None, orig_words, mod_words)
@@ -442,6 +426,44 @@ def word_level_diff(original: str, modified: str) -> str:
             html_parts.append(f"<span style='color:green;font-weight:bold;'>{' '.join(mod_words[j1:j2])}</span> ")
     return ' '.join(html_parts)
 
+def compute_metrics(original: str, enhanced: str):
+    try:
+        words_orig = word_tokenize(original.lower())
+        words_enh = word_tokenize(enhanced.lower())
+        freq_orig = nltk.FreqDist(words_orig)
+        log_prob_sum = sum(math.log(max(freq_orig.freq(w),1e-10)) for w in words_enh if w.isalpha())
+        count = sum(1 for w in words_enh if w.isalpha())
+        perplexity = math.exp(-log_prob_sum/count) if count else 0.0
+        lengths = [len(word_tokenize(s)) for s in sent_tokenize(enhanced)]
+        burstiness = float(np.std(lengths)/np.mean(lengths)) if np.mean(lengths)>0 else 0.0
+        tokens_enh = [w.lower() for w in words_enh if w.isalpha()]
+        ttr = len(set(tokens_enh))/len(tokens_enh) if tokens_enh else 0.0
+        return perplexity, burstiness, ttr
+    except Exception:
+        return 0.0, 0.0, 0.0
+
+# =============================================================================
+# دالة المعالجة الأساسية (callback)
+# =============================================================================
+def process_text_callback():
+    """تُستدعى عند النقر على زر المعالجة. تخزن النتائج في session_state."""
+    if not st.session_state.get("text_input", ""):
+        return
+
+    engine = DeepCleanEngine(
+        domain=st.session_state.get("domain", "general"),
+        intensity=st.session_state.get("intensity", 3),
+        text=st.session_state["text_input"]
+    )
+
+    # لا نستخدم update_progress هنا لأنها تتطلب session_state
+    enhanced = engine.run_pipeline()
+
+    st.session_state.enhanced_text = enhanced
+    st.session_state.perplexity, st.session_state.burstiness, st.session_state.ttr = \
+        compute_metrics(st.session_state["text_input"], enhanced)
+    st.session_state.processing_done = True
+
 
 # =============================================================================
 # واجهة المستخدم – Streamlit
@@ -450,11 +472,24 @@ st.set_page_config(page_title="DeepClean Studio", layout="wide")
 st.title("🛡️ DeepClean Studio")
 st.markdown("تحويل النصوص الأكاديمية من نمط الذكاء الاصطناعي إلى طابع بشري خبير")
 
+# تهيئة session_state
+defaults = {
+    "perplexity": 0.0, "burstiness": 0.0, "ttr": 0.0,
+    "enhanced_text": "", "processing_done": False,
+    "text_input": "", "domain": "medical", "intensity": 3
+}
+for k, v in defaults.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
+
+# ------------------------- الشريط الجانبي -------------------------
 with st.sidebar:
     st.header("⚙️ الإعدادات")
     input_option = st.radio("مصدر النص:", ("رفع ملف", "لصق نص"), key="source_radio")
+
     uploaded_file = None
     text_input = ""
+
     if input_option == "رفع ملف":
         uploaded_file = st.file_uploader("اختر ملفًا (txt, docx, pdf)", type=["txt","docx","pdf"], key="file_uploader")
         if uploaded_file is not None:
@@ -471,91 +506,66 @@ with st.sidebar:
     else:
         text_input = st.text_area("ألصق النص الأكاديمي هنا:", height=200, key="paste_area")
 
-    intensity = st.slider("قوة التحويل", 1,5,3, help="1=دقيق ومحافظ، 5=تحول إبداعي")
+    # حفظ النص المدخل في session_state
+    if text_input:
+        st.session_state.text_input = text_input
+
+    intensity = st.slider("قوة التحويل", 1, 5, 3, help="1=دقيق ومحافظ، 5=تحول إبداعي", key="intensity")
     domain = st.selectbox("المجال الأكاديمي:", ("medical","engineering","humanities","general"),
-                          format_func=lambda x: {"medical":"طبي","engineering":"هندسي","humanities":"علوم إنسانية","general":"عام"}[x])
-    grammar_check = st.checkbox("تفعيل التدقيق اللغوي (لغة إنجليزية)")
-    process_btn = st.button("🛡️ بدء التحويل الآمن", type="primary", use_container_width=True)
+                          format_func=lambda x: {"medical":"طبي","engineering":"هندسي","humanities":"علوم إنسانية","general":"عام"}[x],
+                          key="domain")
+
+    # استخدام on_click لتجنب st.rerun()
+    process_btn = st.button(
+        "🛡️ بدء التحويل الآمن",
+        type="primary",
+        use_container_width=True,
+        on_click=process_text_callback
+    )
+
     show_changes = st.checkbox("عرض التغييرات للمراجعة البشرية")
 
     st.markdown("---")
     st.subheader("📊 مؤشرات الفحص الذاتي (محلية)")
-    if "perplexity" not in st.session_state:
-        st.session_state.perplexity = 0.0
-        st.session_state.burstiness = 0.0
-        st.session_state.ttr = 0.0
     st.metric("Perplexity (تقريبي)", f"{st.session_state.perplexity:.2f}")
     st.metric("Burstiness Score", f"{st.session_state.burstiness:.2f}")
     st.metric("TTR Ratio", f"{st.session_state.ttr:.2f}")
     st.warning("هذه مؤشرات محلية فقط ولا تضمن اجتياز أي كاشف خارجي.", icon="⚠️")
 
-    if "enhanced_text" in st.session_state and st.session_state.enhanced_text:
+    # زر تحميل النتيجة كـ Word
+    if st.session_state.enhanced_text:
         word_file = create_word_document(st.session_state.enhanced_text)
         st.download_button("📥 تنزيل النص المحسَّن (Word)", data=word_file,
                            file_name="deepclean_output.docx",
                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
+# ------------------------- المنطقة الرئيسية -------------------------
 col1, col2 = st.columns(2)
 with col1:
     st.subheader("📄 النص الأصلي")
-    if text_input:
-        st.text_area("", text_input, height=400, key="orig_text_display")
-        st.caption(f"عدد الكلمات: {len(text_input.split())}")
+    if st.session_state.text_input:
+        st.text_area("", st.session_state.text_input, height=400, key="orig_text_display")
+        st.caption(f"عدد الكلمات: {len(st.session_state.text_input.split())}")
+
 with col2:
     st.subheader("🧬 النص المحسّن")
-    if "enhanced_text" in st.session_state and st.session_state.enhanced_text:
+    if st.session_state.enhanced_text:
         st.text_area("", st.session_state.enhanced_text, height=400, key="enh_text_display")
         st.caption(f"عدد الكلمات: {len(st.session_state.enhanced_text.split())}")
 
-progress_bar = st.progress(0)
-progress_text = st.empty()
-
-def update_progress(stage: str, percent: float):
-    progress_text.text(f"{stage} ({percent:.0%})")
-    progress_bar.progress(min(percent, 1.0))
-
-if process_btn and text_input:
-    st.session_state.perplexity = 0.0
-    st.session_state.burstiness = 0.0
-    st.session_state.ttr = 0.0
-    with st.spinner("جاري المعالجة..."):
-        engine = DeepCleanEngine(domain=domain, intensity=intensity, text=text_input)
-        enhanced_text = engine.run_pipeline(progress_callback=update_progress)
-        if grammar_check:
-            with st.spinner("جاري التدقيق اللغوي..."):
-                enhanced_text = correct_grammar(enhanced_text)
-        st.session_state.enhanced_text = enhanced_text
-
-    try:
-        words_orig = word_tokenize(text_input.lower())
-        words_enh = word_tokenize(enhanced_text.lower())
-        freq_orig = nltk.FreqDist(words_orig)
-        log_prob_sum = sum(math.log(max(freq_orig.freq(w),1e-10)) for w in words_enh if w.isalpha())
-        count = sum(1 for w in words_enh if w.isalpha())
-        perplexity = math.exp(-log_prob_sum/count) if count else 0.0
-        lengths = [len(word_tokenize(s)) for s in sent_tokenize(enhanced_text)]
-        burstiness = float(np.std(lengths)/np.mean(lengths)) if np.mean(lengths)>0 else 0.0
-        tokens_enh = [w.lower() for w in words_enh if w.isalpha()]
-        ttr = len(set(tokens_enh))/len(tokens_enh) if tokens_enh else 0.0
-    except Exception:
-        perplexity = burstiness = ttr = 0.0
-    st.session_state.perplexity = perplexity
-    st.session_state.burstiness = burstiness
-    st.session_state.ttr = ttr
-
-if show_changes and "enhanced_text" in st.session_state and text_input:
+# ------------------------- عرض التغييرات -------------------------
+if show_changes and st.session_state.enhanced_text and st.session_state.text_input:
     st.markdown("---")
     st.subheader("🔍 تفاصيل التغييرات (مقارنة كلمة بكلمة)")
 
-    diff_html = word_level_diff(text_input, st.session_state.enhanced_text)
+    diff_html = word_level_diff(st.session_state.text_input, st.session_state.enhanced_text)
     st.markdown(
         f"""<div style='background-color:#f9f9f9; padding:15px; border-radius:8px; line-height:1.6;'>
         {diff_html}</div>""",
         unsafe_allow_html=True
     )
 
-    # جدول ملخص بالتعديلات
-    orig_words_set = set(word_tokenize(text_input.lower()))
+    orig_words_set = set(word_tokenize(st.session_state.text_input.lower()))
     enh_words_set = set(word_tokenize(st.session_state.enhanced_text.lower()))
     removed = [w for w in orig_words_set if w not in enh_words_set and w.isalpha()]
     added = [w for w in enh_words_set if w not in orig_words_set and w.isalpha()]
