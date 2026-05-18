@@ -22,10 +22,20 @@ from collections import Counter
 import docx2txt
 import pypdf
 
-pdf_reader = pypdf.PdfReader(uploaded_file)
-text_input = ""
-for page in pdf_reader.pages:
-    text_input += page.extract_text()
+if uploaded_file is not None:
+    try:
+        if uploaded_file.name.endswith('.txt'):
+            text_input = uploaded_file.read().decode('utf-8')
+        elif uploaded_file.name.endswith('.docx'):
+            text_input = docx2txt.process(uploaded_file)
+        elif uploaded_file.name.endswith('.pdf'):
+            import pypdf  # تأكد من الاستيراد هنا أو في أعلى الملف
+            pdf_reader = pypdf.PdfReader(uploaded_file)
+            text_input = ""
+            for page in pdf_reader.pages:
+                text_input += page.extract_text()
+    except Exception as e:
+        st.error(f"خطأ في قراءة الملف: {e}")
 
 # ---------------------------------------------------------------------------
 # تنزيل موارد NLTK الضرورية (يتم تنفيذه مرة واحدة)
