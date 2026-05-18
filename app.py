@@ -20,7 +20,12 @@ from typing import List, Tuple, Dict, Any, Optional
 from sentence_transformers import SentenceTransformer, util
 from collections import Counter
 import docx2txt
-import PyPDF2
+import pypdf
+
+pdf_reader = pypdf.PdfReader(uploaded_file)
+text_input = ""
+for page in pdf_reader.pages:
+    text_input += page.extract_text()
 
 # ---------------------------------------------------------------------------
 # تنزيل موارد NLTK الضرورية (يتم تنفيذه مرة واحدة)
