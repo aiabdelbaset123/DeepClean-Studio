@@ -28,7 +28,7 @@ import pypdf
 # ---- الشريط الجانبي ----
 with st.sidebar:
     st.header("⚙️ الإعدادات")
-    input_option = st.radio("مصدر النص:", ("رفع ملف", "لصق نص"))
+    input_option = st.radio("مصدر النص:", ("رفع ملف", "لصق نص"), key="source_radio")
     uploaded_file = None
     text_input = ""
     if input_option == "رفع ملف":
