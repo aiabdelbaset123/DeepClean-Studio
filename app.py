@@ -1,39 +1,28 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-DeepClean Studio - الإصدار الشامل النهائي (مصحح)
-يدعم رفع Word مع الحفاظ على التنسيق، ولصق النص، وتحليل الشفافية.
+DeepClean Studio - Local Final Edition
+يعمل على النصوص المستخرجة (لصق، txt، pdf) ويطبق قواعد إعادة الصياغة البشرية.
+لا يعالج ملفات Word مباشرة لتجنب تدمير الجداول والأشكال.
 """
 
 import re
+import random
 import streamlit as st
 from io import BytesIO
-from typing import Tuple, Dict, Optional
+from typing import List, Tuple, Dict
 
-# مكتبات اختيارية
-try:
-    from docx import Document
-    from docx.shared import Pt
-    DOCX_AVAILABLE = True
-except ImportError:
-    DOCX_AVAILABLE = False
-
-try:
-    import docx2txt
-    DOCX2TXT_AVAILABLE = True
-except ImportError:
-    DOCX2TXT_AVAILABLE = False
-
+# مكتبات استخراج النص من PDF
 try:
     import pypdf
     PDF_AVAILABLE = True
 except ImportError:
     PDF_AVAILABLE = False
 
-st.set_page_config(page_title="DeepClean Studio - النهائي", layout="wide")
+st.set_page_config(page_title="DeepClean Studio - المحلي النهائي", layout="wide")
 
 # ============================================================
-# 1. قواعد إعادة الصياغة البشرية (نفس السابق)
+# 1. قواعد إعادة الصياغة البشرية (من ملف Wikipedia)
 # ============================================================
 
 PHRASE_REPLACEMENTS = [
@@ -73,48 +62,54 @@ WORD_REPLACEMENTS = {
     "fragmented": "disconnected", "incorporating": "using",
 }
 
-FORBIDDEN_SET = set(WORD_REPLACEMENTS.keys()) | {
-    "additionally", "moreover", "furthermore", "consequently", "hence",
-    "crucial", "pivotal", "vital", "significant", "profound", "robust",
-    "comprehensive", "delve", "showcase", "underscore", "highlight",
-    "resonate", "garner", "tapestry", "testament", "landscape",
-    "intricate", "multifaceted", "constitute", "trajectories", "pronounced",
-    "routinely", "impose", "exceeding", "constituting", "cumulative",
-    "uniquely", "forecasts", "committed", "expose", "fragmented", "incorporating"
-}
-
-def split_long_sentences(text: str, max_words: int = 25) -> str:
-    sentences = re.split(r'(?<=[.!?])\s+', text)
+def split_long_sentences(text: str, max_words: int = 28) -> str:
+    """تقطيع الجمل الطويلة إلى جملتين، مع الحفاظ على علامات الترقيم الأساسية."""
+    sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z\d])', text)
     new_sentences = []
     for sent in sentences:
         words = sent.split()
         if len(words) <= max_words:
             new_sentences.append(sent)
             continue
-        split_points = []
+        # البحث عن فاصلة أو حرف عطف مناسب للتقطيع
+        split_pos = -1
         for i, w in enumerate(words):
-            if i > 5 and i < len(words)-5 and w.lower() in (',', ';', 'and', 'but', 'so', 'because'):
-                split_points.append(i)
-        if not split_points:
-            mid = len(words) // 2
-            split_points.append(mid)
-        best = min(split_points, key=lambda x: abs(x - len(words)//2))
-        part1 = ' '.join(words[:best]).strip()
-        part2 = ' '.join(words[best+1:]).strip()
-        if part1 and part2:
-            if part1[-1] not in '.!?':
-                part1 += '.'
-            if part2[-1] not in '.!?':
-                part2 += '.'
-            part2 = part2[0].upper() + part2[1:]
-            new_sentences.extend([part1, part2])
+            if i > 6 and i < len(words)-4 and w.lower() in (',', 'and', 'but', 'so', 'because', 'while', 'whereas'):
+                split_pos = i
+                break
+        if split_pos > 0:
+            first = ' '.join(words[:split_pos]).strip()
+            second = ' '.join(words[split_pos+1:]).strip()
+            if first and second:
+                if first[-1] not in '.!?':
+                    first += '.'
+                if second[-1] not in '.!?':
+                    second += '.'
+                second = second[0].upper() + second[1:]
+                new_sentences.extend([first, second])
+            else:
+                new_sentences.append(sent)
         else:
-            new_sentences.append(sent)
+            # تقطيع في المنتصف
+            mid = len(words) // 2
+            first = ' '.join(words[:mid]).strip()
+            second = ' '.join(words[mid:]).strip()
+            if first and second:
+                if first[-1] not in '.!?':
+                    first += '.'
+                if second[-1] not in '.!?':
+                    second += '.'
+                second = second[0].upper() + second[1:]
+                new_sentences.extend([first, second])
+            else:
+                new_sentences.append(sent)
     return ' '.join(new_sentences)
 
 def humanize_text(text: str, intensity: int = 3) -> str:
+    """تطبيق جميع قواعد التحويل."""
     if not text.strip():
         return text
+    # تحويل إلى حروف صغيرة للاستبدال (مع الحفاظ على الحالة الأصلية في الناتج)
     text_lower = text.lower()
     for old, new in PHRASE_REPLACEMENTS:
         if old in text_lower:
@@ -122,18 +117,22 @@ def humanize_text(text: str, intensity: int = 3) -> str:
     for old, new in WORD_REPLACEMENTS.items():
         if old in text_lower:
             text = re.compile(rf'\b{re.escape(old)}\b', re.IGNORECASE).sub(new, text)
+    # تنظيف المسافات وعلامات الترقيم الزائدة (بدون إضافة نقاط عشوائية)
     text = re.sub(r'\s+', ' ', text)
     text = re.sub(r'\s+([.,;:!?])', r'\1', text)
+    text = re.sub(r'([.,;:!?])\s+', r'\1 ', text)
+    # تقطيع الجمل الطويلة حسب الشدة
     if intensity >= 3:
-        text = split_long_sentences(text, max_words=25)
+        text = split_long_sentences(text, max_words=26)
     elif intensity >= 2:
-        text = split_long_sentences(text, max_words=30)
+        text = split_long_sentences(text, max_words=32)
+    # التأكد من أول حرف كبير
     if text and text[0].islower():
         text = text[0].upper() + text[1:]
-    return text
+    return text.strip()
 
 # ============================================================
-# 2. تحليل النص (الشفافية)
+# 2. تحليل النص ومؤشرات الجودة
 # ============================================================
 
 def token_count(text: str) -> int:
@@ -154,7 +153,7 @@ def lexical_diversity(text: str) -> float:
 
 def estimate_perplexity(text: str) -> float:
     words = re.findall(r'\b\w+\b', text.lower())
-    if len(words) < 3:
+    if len(words) < 5:
         return 50.0
     unique = len(set(words))
     diversity = unique / len(words)
@@ -168,9 +167,19 @@ def estimate_burstiness(text: str) -> float:
     var = sum((l - mean)**2 for l in lengths) / len(lengths)
     return var / (mean + 1e-6)
 
-def count_forbidden(text: str) -> int:
+def count_forbidden_words(text: str) -> int:
     lowered = text.lower()
-    return sum(1 for w in FORBIDDEN_SET if w in lowered)
+    forbidden = {
+        "additionally", "moreover", "furthermore", "consequently", "hence",
+        "crucial", "pivotal", "vital", "significant", "profound", "robust",
+        "comprehensive", "delve", "showcase", "underscore", "highlight",
+        "resonate", "garner", "tapestry", "testament", "landscape",
+        "intricate", "multifaceted", "constitute", "trajectories",
+        "pronounced", "routinely", "impose", "exceeding", "constituting",
+        "cumulative", "uniquely", "forecasts", "committed", "expose",
+        "fragmented", "incorporating"
+    }
+    return sum(1 for w in forbidden if w in lowered)
 
 def analyze_text(text: str) -> Dict:
     return {
@@ -179,18 +188,18 @@ def analyze_text(text: str) -> Dict:
         "lexical_diversity": lexical_diversity(text),
         "perplexity": estimate_perplexity(text),
         "burstiness": estimate_burstiness(text),
-        "forbidden": count_forbidden(text),
+        "forbidden": count_forbidden_words(text),
     }
 
 def ai_score(analysis: Dict) -> float:
     score = 0.0
     if analysis["lexical_diversity"] < 0.4:
         score += 0.3
-    elif analysis["lexical_diversity"] > 0.6:
+    elif analysis["lexical_diversity"] > 0.65:
         score -= 0.2
     if analysis["burstiness"] < 0.15:
         score += 0.35
-    elif analysis["burstiness"] > 0.35:
+    elif analysis["burstiness"] > 0.4:
         score -= 0.2
     if analysis["perplexity"] < 35:
         score += 0.25
@@ -199,154 +208,127 @@ def ai_score(analysis: Dict) -> float:
     score += min(0.4, analysis["forbidden"] * 0.05)
     return min(0.99, max(0.0, score))
 
-def classify(score: float) -> str:
+def classify_score(score: float) -> str:
     if score < 0.20:
-        return "بشري (إشارة منخفضة) 🟢"
+        return "🟢 بشري (إشارة منخفضة)"
     elif score < 0.40:
-        return "بشري محتمل 🟡"
+        return "🟡 بشري محتمل"
     elif score < 0.60:
-        return "مختلط 🟠"
+        return "🟠 مختلط"
     else:
-        return "آلي محتمل 🔴"
+        return "🔴 آلي محتمل"
 
 # ============================================================
-# 3. معالجة الملفات
+# 3. دوال استخراج النص من الملفات
 # ============================================================
 
 def extract_text_from_pdf(file_bytes: BytesIO) -> str:
     if not PDF_AVAILABLE:
-        return "تثبيت pypdf: pip install pypdf"
+        return "خطأ: مكتبة pypdf غير مثبتة"
     reader = pypdf.PdfReader(file_bytes)
     return "\n".join(page.extract_text() or "" for page in reader.pages)
 
-def extract_text_from_docx(file_bytes: BytesIO) -> str:
-    if not DOCX2TXT_AVAILABLE:
-        return "تثبيت docx2txt: pip install docx2txt"
-    return docx2txt.process(file_bytes) or ""
-
-def process_docx_file(file_bytes: BytesIO, intensity: int) -> BytesIO:
-    """تعديل ملف Word مع الحفاظ على الجداول والأشكال."""
-    if not DOCX_AVAILABLE:
-        raise ImportError("python-docx غير مثبت")
-    # Reset stream position
-    file_bytes.seek(0)
-    doc = Document(file_bytes)
-    for para in doc.paragraphs:
-        if para.text.strip():
-            new_text = humanize_text(para.text, intensity)
-            if new_text != para.text:
-                para.clear()
-                run = para.add_run(new_text)
-                run.font.name = "Times New Roman"
-                run.font.size = Pt(12)
-    out = BytesIO()
-    doc.save(out)
-    out.seek(0)
-    return out
+def extract_text_from_txt(file_bytes: BytesIO) -> str:
+    return file_bytes.read().decode('utf-8', errors='replace')
 
 # ============================================================
-# 4. واجهة المستخدم
+# 4. واجهة المستخدم الرئيسية
 # ============================================================
 
 def main():
-    st.title("📄 DeepClean Studio – الإصدار النهائي المتكامل")
-    st.caption("إعادة كتابة النصوص الأكاديمية بأسلوب بشري - مع تحليل شفاف - يجتاز ZeroGPT")
-    
+    st.title("📄 DeepClean Studio – الإصدار المحلي النهائي")
+    st.markdown("""
+    <style>
+    .stTextArea textarea { font-family: 'Courier New', monospace; }
+    .good { color: green; }
+    .bad { color: red; }
+    </style>
+    """, unsafe_allow_html=True)
+    st.caption("يعمل محلياً – يحول النصوص الأكاديمية إلى أسلوب بشري – يجتاز ZeroGPT")
+    st.caption("⚠️ ملاحظة: للحفاظ على الجداول والأشكال في ملف Word، قم بنسخ النص المعدل ولصقه يدوياً في المستند الأصلي.")
+
     with st.sidebar:
         st.header("⚙️ الإعدادات")
         intensity = st.slider("شدة المراجعة", 1, 5, 3,
-                              help="كلما زادت الشدة، زاد تقطيع الجمل الطويلة واستبدال الكلمات")
+                              help="1=أخف تغيير، 5=أقصى تغيير وتقطيع للجمل الطويلة")
         st.markdown("---")
         st.header("📥 إدخال النص")
-        input_type = st.radio("المصدر", ["لصق نص", "رفع ملف Word", "رفع ملف PDF/TXT"])
-        
+        source = st.radio("المصدر", ["لصق نص", "رفع ملف PDF", "رفع ملف TXT"])
         user_text = ""
-        uploaded_file = None
-        file_bytes = None
-        
-        if input_type == "لصق نص":
-            user_text = st.text_area("ألصق النص هنا", height=200)
-        else:
-            if input_type == "رفع ملف Word":
-                uploaded_file = st.file_uploader("اختر ملف Word", type=["docx"])
-            else:
-                uploaded_file = st.file_uploader("اختر ملف PDF أو TXT", type=["pdf", "txt"])
-            if uploaded_file:
-                file_bytes = BytesIO(uploaded_file.read())
-                if input_type == "رفع ملف Word":
-                    # لا نستخرج النص إلا للعرض
-                    if DOCX2TXT_AVAILABLE:
-                        user_text = docx2txt.process(BytesIO(uploaded_file.getvalue())) or ""
-                    else:
-                        user_text = "تثبيت docx2txt لعرض النص"
-                elif uploaded_file.name.endswith('.pdf'):
-                    user_text = extract_text_from_pdf(BytesIO(uploaded_file.getvalue()))
-                else:
-                    user_text = uploaded_file.getvalue().decode('utf-8', errors='replace')
-        
+        if source == "لصق نص":
+            user_text = st.text_area("ألصق النص الأكاديمي هنا (مقدمة، مناقشة، خاتمة...)", height=300)
+        elif source == "رفع ملف PDF":
+            uploaded = st.file_uploader("اختر ملف PDF", type=["pdf"])
+            if uploaded:
+                with st.spinner("جاري استخراج النص من PDF..."):
+                    user_text = extract_text_from_pdf(BytesIO(uploaded.read()))
+                if user_text:
+                    st.success(f"تم استخراج {len(user_text)} حرف")
+        else:  # TXT
+            uploaded = st.file_uploader("اختر ملف TXT", type=["txt"])
+            if uploaded:
+                user_text = extract_text_from_txt(BytesIO(uploaded.read()))
+                st.success(f"تم تحميل {len(user_text)} حرف")
+
         process = st.button("🚀 بدء المراجعة والتحليل", type="primary", use_container_width=True)
-    
-    if process:
-        # حالة: النص المباشر أو النص المستخرج من ملف غير Word
-        if user_text and input_type != "رفع ملف Word":
-            with st.spinner("جاري المعالجة..."):
-                orig_analysis = analyze_text(user_text)
-                orig_score = ai_score(orig_analysis)
-                revised = humanize_text(user_text, intensity)
-                rev_analysis = analyze_text(revised)
-                rev_score = ai_score(rev_analysis)
-            
-            # عرض النتائج
-            col1, col2 = st.columns(2)
-            with col1:
-                st.subheader("📊 النص الأصلي")
-                st.metric("الكلمات", orig_analysis["words"])
-                st.metric("متوسط طول الجملة", f"{orig_analysis['avg_sentence_len']:.1f}")
-                st.metric("التنوع المعجمي", f"{orig_analysis['lexical_diversity']:.3f}")
-                st.metric("التشوش", f"{orig_analysis['perplexity']:.1f}")
-                st.metric("الاندفاع", f"{orig_analysis['burstiness']:.3f}")
-                st.metric("كلمات محظورة", orig_analysis["forbidden"])
-                st.metric("درجة الآلية", f"{orig_score:.2f}")
-                st.write(f"**التصنيف:** {classify(orig_score)}")
-            with col2:
-                st.subheader("✨ النص المعدل")
-                st.metric("الكلمات", rev_analysis["words"])
-                st.metric("متوسط طول الجملة", f"{rev_analysis['avg_sentence_len']:.1f}")
-                st.metric("التنوع المعجمي", f"{rev_analysis['lexical_diversity']:.3f}")
-                st.metric("التشوش", f"{rev_analysis['perplexity']:.1f}")
-                st.metric("الاندفاع", f"{rev_analysis['burstiness']:.3f}")
-                st.metric("كلمات محظورة", rev_analysis["forbidden"])
-                st.metric("درجة الآلية", f"{rev_score:.2f}")
-                st.write(f"**التصنيف:** {classify(rev_score)}")
-            
-            # عرض النصوص في تبويبات
-            tab1, tab2 = st.tabs(["📝 النص الأصلي", "✨ النص المعدل"])
-            with tab1:
-                st.text_area("", user_text, height=300)
-            with tab2:
-                st.text_area("", revised, height=300)
-                st.download_button("📥 تحميل النص المعدل (TXT)", data=revised.encode('utf-8'),
-                                   file_name="deepclean_humanized.txt")
-        
-        # حالة: ملف Word مباشر (معالجة آمنة)
-        elif uploaded_file and input_type == "رفع ملف Word" and file_bytes:
-            with st.spinner("جاري معالجة ملف Word مع الحفاظ على الجداول والأشكال..."):
-                try:
-                    out_bytes = process_docx_file(file_bytes, intensity)
-                    st.success("تمت معالجة الملف بنجاح! الجداول والأشكال والمعادلات سليمة.")
-                    st.download_button("📥 تحميل الملف المعدّل (Word)", data=out_bytes,
-                                       file_name="deepclean_humanized.docx",
-                                       mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-                    # عرض تحليل النص المستخرج (للإرشاد فقط)
-                    if user_text and len(user_text) > 100:
-                        st.info("تحليل تقديري للنص المستخرج (وليس الملف نفسه):")
-                        ext_analysis = analyze_text(user_text[:5000])
-                        ext_score = ai_score(ext_analysis)
-                        st.write(f"درجة الآلية التقديرية: {ext_score:.2f} - {classify(ext_score)}")
-                except Exception as e:
-                    st.error(f"حدث خطأ أثناء معالجة الملف: {e}")
-        else:
-            st.warning("الرجاء إدخال نص أو رفع ملف.")
+
+    if process and user_text:
+        with st.spinner("جاري المعالجة..."):
+            orig_analysis = analyze_text(user_text)
+            orig_score = ai_score(orig_analysis)
+            revised = humanize_text(user_text, intensity)
+            rev_analysis = analyze_text(revised)
+            rev_score = ai_score(rev_analysis)
+
+        # عرض المقارنة
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("📊 النص الأصلي")
+            st.metric("عدد الكلمات", orig_analysis["words"])
+            st.metric("متوسط طول الجملة", f"{orig_analysis['avg_sentence_len']:.1f}")
+            st.metric("التنوع المعجمي", f"{orig_analysis['lexical_diversity']:.3f}")
+            st.metric("التشوش (perplexity)", f"{orig_analysis['perplexity']:.1f}")
+            st.metric("الاندفاع (burstiness)", f"{orig_analysis['burstiness']:.3f}")
+            st.metric("كلمات محظورة", orig_analysis["forbidden"])
+            st.metric("درجة الآلية", f"{orig_score:.2f}")
+            st.write(f"**التصنيف:** {classify_score(orig_score)}")
+        with col2:
+            st.subheader("✨ النص المعدل (بشري)")
+            st.metric("عدد الكلمات", rev_analysis["words"])
+            st.metric("متوسط طول الجملة", f"{rev_analysis['avg_sentence_len']:.1f}")
+            st.metric("التنوع المعجمي", f"{rev_analysis['lexical_diversity']:.3f}")
+            st.metric("التشوش (perplexity)", f"{rev_analysis['perplexity']:.1f}")
+            st.metric("الاندفاع (burstiness)", f"{rev_analysis['burstiness']:.3f}")
+            st.metric("كلمات محظورة", rev_analysis["forbidden"])
+            st.metric("درجة الآلية", f"{rev_score:.2f}")
+            st.write(f"**التصنيف:** {classify_score(rev_score)}")
+
+        # عرض النصوص
+        tab1, tab2 = st.tabs(["📝 النص الأصلي", "✨ النص المعدل"])
+        with tab1:
+            st.text_area("", user_text, height=400, key="orig_text")
+        with tab2:
+            st.text_area("", revised, height=400, key="rev_text")
+            st.download_button("📥 تحميل النص المعدل (TXT)", data=revised.encode('utf-8'),
+                               file_name="deepclean_humanized.txt", mime="text/plain")
+            st.info("💡 **للاستخدام في Word:** انسخ النص المعدل من الأعلى وألصقه في مستند Word الأصلي (فقط استبدل الفقرات النصية، ولا تلمس الجداول والأشكال والمعادلات).")
+
+    elif process:
+        st.warning("الرجاء إدخال نص أو رفع ملف.")
+
+    with st.expander("📌 تعليمات وتوضيحات"):
+        st.markdown("""
+        **كيف يعمل هذا التطبيق:**
+        - هذا التطبيق يعالج **النصوص فقط** (من اللصق أو من ملفات PDF/TXT).
+        - الهدف هو تحويل الصياغة الأكاديمية الآلية إلى أسلوب بشري طبيعي، باستبدال العبارات الطويلة والكلمات المحظورة، وتقطيع الجمل الطويلة.
+        - بعد معالجة النص، يمكنك نسخه ولصقه مباشرة في ملف Word الأصلي، مع **الحفاظ يدوياً على الجداول والأشكال والمعادلات** (لأن التعديل الآلي لملفات Word يدمر هذه العناصر).
+
+        **نصائح لاجتياز ZeroGPT:**
+        - استخدم شدة مراجعة 3 أو 4.
+        - راجع النص المعدل وأزل أي جمل قد تكون طويلة جداً (>30 كلمة).
+        - تأكد من أن النص يحتوي على تنوع في أطوال الجمل (بعضها قصير جداً 5-8 كلمات).
+        - يجب أن تكون درجة الآلية (AI score) أقل من 0.40، ويفضل أقل من 0.25.
+        """)
 
 if __name__ == "__main__":
     main()
