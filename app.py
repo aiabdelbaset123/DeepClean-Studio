@@ -60,6 +60,11 @@ class RevisionStats:
     certainty_marker_count: int
     sentence_length_variation: float
     authorship_review_band: str
+    type_token_ratio: float = 0.0
+    punctuation_entropy: float = 0.0
+    function_word_bigram_concentration: float = 0.0
+    tortured_phrase_count: int = 0
+    burstiness_cv: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -96,6 +101,7 @@ class TransparencyReport:
     source_code_alerts: Tuple[str, ...]
     section_notes: Tuple[str, ...]
     model_update_note: str
+    structural_alerts: Tuple[str, ...] = ()
 
 
 FORMULAIC_PATTERNS = [
@@ -175,6 +181,93 @@ FORMULAIC_PATTERNS = [
     r"وبناءً على ما سبق",
     r"من ناحية أخرى",
     r"تجدر الإشارة إلى",
+    # Negative parallelisms
+    r"\bnot only\b[^.!?]{0,60}\bbut also\b",
+    r"\bnot just\b[^.!?]{0,60}\bbut also\b",
+    r"\bit's not\b[^.!?]{0,40}\bit's\b",
+    r"\bnot a\b[^.!?]{0,40}\bbut a\b",
+    # Promotional / advertisement-like language
+    r"\bnestled in\b",
+    r"\bin the heart of\b",
+    r"\bgroundbreaking\b",
+    r"\brenowned\b",
+    r"\bfeaturing a\b",
+    r"\bdiverse array\b",
+    r"\bexemplifies\b",
+    r"\bcommitment to\b",
+    r"\bnatural beauty\b",
+    r"\bcommitment to excellence\b",
+    r"\bworld-class\b",
+    r"\bstate-of-the-art\b",
+    r"\bcutting-edge\b",
+    r"\bpremier\b",
+    r"\bleading provider\b",
+    r"\btailored\b",
+    r"\bempower(?:s|ed|ing)?\b",
+    r"\bunlock(?:s|ed|ing)?\b",
+    r"\bstreamlin(?:e|es|ed|ing)\b",
+    # Avoidance of basic copulatives
+    r"\brefers to\b",
+    r"\bis defined as\b",
+    r"\bis known as\b",
+    r"\bis described as\b",
+    # Challenges + future prospects formula
+    r"\bdespite (?:its|these|the) [^.!?]{0,80}faces (?:several |many |numerous )?challenges?\b",
+    r"\bfuture (?:outlook|prospects|directions|implications)\b",
+    r"\blooking ahead\b",
+    r"\bmoving forward\b",
+    r"\bchallenges and (?:opportunities|future|legacy)\b",
+    # Canned communication
+    r"\bwould you like\b",
+    r"\bis there anything else\b",
+    r"\blet me know\b",
+    r"\bI am open to\b",
+    r"\bfeel free to\b",
+    r"\bdo not hesitate to\b",
+    r"\bI'd be happy to\b",
+    r"\bI'd be glad to\b",
+    # Placeholder / template text
+    r"\bXX-XX-XXXX\b",
+    r"\bYYYY-MM-DD\b",
+    r"\b\[insert\b",
+    r"\b\[citation needed\]\b",
+    r"\b\[insert citation\]\b",
+    r"\b\[insert name\]\b",
+    r"\b\[insert date\]\b",
+    r"\b\[insert reference\]\b",
+    # ChatGPT-specific markup
+    r"\bcontentReference\b",
+    r"\boai_citation\b",
+    r"\bgrok_card\b",
+    r"\bgrok_render_citation\b",
+    r"\bturn\dsearch\d\b",
+    # Didactic disclaimers
+    r"\bit's important to (?:note|remember|consider|understand)\b",
+    r"\bit is important to (?:remember|consider|understand)\b",
+    r"\bkeep in mind that\b",
+    r"\bbear in mind that\b",
+    # Section summaries
+    r"\bin short\b",
+    r"\bto summarize\b",
+    r"\bto sum up\b",
+    r"\bwrapping up\b",
+    # Exaggerated notability
+    r"\bwidely regarded as\b",
+    r"\bhighly (?:acclaimed|respected|regarded|sought)\b",
+    r"\binternationally recognized\b",
+    r"\bglobally recognized\b",
+    # Knowledge cutoff / speculation about gaps
+    r"\bwhile specific details are (?:limited|scarce)\b",
+    r"\bnot widely (?:available|documented|disclosed)\b",
+    r"\bmaintains a low profile\b",
+    r"\bkeeps (?:personal|private) details (?:private|under wraps)\b",
+    r"\binformation about .{0,30} (?:is|remains) (?:limited|scarce|unavailable)\b",
+    # Additional transitional fillers
+    r"\bhence\b",
+    r"\bconsequently\b",
+    r"\bthus\b",
+    # "concrete" overuse (ChatGPT defense word)
+    r"\bconcrete (?:example|evidence|steps|action|proof)\b",
 ]
 CERTAINTY_PATTERNS = [
     r"\bclearly proves\b",
@@ -183,6 +276,58 @@ CERTAINTY_PATTERNS = [
     r"\bnever\b",
     r"\bdefinitely\b",
     r"\bundoubtedly\b",
+]
+
+TORTURED_PHRASES = [
+    (r"\bsynthetic cognitive capability\b", "artificial intelligence"),
+    (r"\bcomputational reasoning system\b", "artificial intelligence"),
+    (r"\bmachine cognition\b", "artificial intelligence"),
+    (r"\bautomated reasoning platform\b", "AI system"),
+    (r"\bdigital information processing\b", "computing"),
+    (r"\belectronic computational device\b", "computer"),
+    (r"\bhuman-computer interaction\b", "user interface"),
+    (r"\bvirtual presence\b", "online presence"),
+    (r"\bknowledge retrieval system\b", "search engine"),
+    (r"\bpredictive analytics model\b", "prediction model"),
+    (r"\bdata-driven insights\b", "findings from data"),
+    (r"\bactionable intelligence\b", "useful information"),
+    (r"\bcognitive computational framework\b", "AI framework"),
+    (r"\bintellectual property asset\b", "patent"),
+    (r"\bstrategic advantage\b", "advantage"),
+    (r"\bcompetitive positioning\b", "market position"),
+    (r"\bstakeholder engagement\b", "communication"),
+    (r"\bvalue proposition\b", "offering"),
+    (r"\bparadigm shift\b", "shift"),
+    (r"\bsynergistic integration\b", "combination"),
+    (r"\bcross-functional collaboration\b", "teamwork"),
+    (r"\bthought leadership\b", "expertise"),
+    (r"\bbest practices\b", "standard methods"),
+    (r"\bleverage synergies\b", "combine efforts"),
+    (r"\bdisruptive innovation\b", "new approach"),
+    (r"\bscalable solution\b", "solution"),
+    (r"\bend-to-end\b", "complete"),
+    (r"\bdata-driven decision making\b", "evidence-based decisions"),
+    (r"\bcontinuous improvement\b", "improvement"),
+    (r"\bdeep dive\b", "detailed examination"),
+    (r"\bgranular level\b", "detailed level"),
+    (r"\bholistic approach\b", "broad approach"),
+    (r"\bquantum leap\b", "major step"),
+    (r"\bgame-changer\b", "major change"),
+    (r"\bnext-generation\b", "new"),
+    (r"\bmission-critical\b", "essential"),
+    (r"\bfuture-proof\b", "durable"),
+    (r"\bbest-in-class\b", "top"),
+    (r"\bindustry-leading\b", "leading"),
+    (r"\bhigh-performance\b", "fast"),
+    (r"\bmission-driven\b", "purposeful"),
+    # Arabic tortured phrases
+    (r"القدرة المعرفية الاصطناعية", "الذكاء الاصطناعي"),
+    (r"نظام الحوسبة العصبية", "نظام الذكاء الاصطناعي"),
+    (r"التكنولوجيا الرقمية المتقدمة", "التكنولوجيا المتقدمة"),
+    (r"منصة التحليل التنبؤي", "نموذج التنبؤ"),
+    (r"إدارة المعرفة المؤسسية", "إدارة المعرفة"),
+    (r"الابتكار المزعزع", "الابتكار الجديد"),
+    (r"الريادة الفكرية", "الخبرة"),
 ]
 
 AI_VOCABULARY_TERMS = [
@@ -248,6 +393,46 @@ AI_VOCABULARY_TERMS = [
     "بشكل شامل",
     "محوري",
     "حيوي",
+    "nestled",
+    "groundbreaking",
+    "renowned",
+    "featuring",
+    "diverse array",
+    "exemplifies",
+    "commitment to",
+    "natural beauty",
+    "world-class",
+    "state-of-the-art",
+    "cutting-edge",
+    "premier",
+    "tailored",
+    "empower",
+    "unlock",
+    "streamline",
+    "concrete",
+    "refers to",
+    "hence",
+    "consequently",
+    "thus",
+    "widely regarded",
+    "exemplify",
+    "fostering",
+    "cultivating",
+    "encompassing",
+    "leveraging",
+    "bolster",
+    "elevate",
+    "ensure",
+    "enhance",
+    "innovative",
+    "dynamic",
+    "vibrant",
+    "بشكل ملموس",
+    "رائد",
+    "فريد من نوعه",
+    "على المستوى العالمي",
+    "بشكل استثنائي",
+    "متطور",
 ]
 
 WIKIPEDIA_AI_STYLE_REWRITES = [
@@ -334,6 +519,95 @@ WIKIPEDIA_AI_STYLE_REWRITES = [
     (r"\bin summary,?\s+", ""),
     (r"\bin conclusion,?\s+", ""),
     (r"\boverall,?\s+", ""),
+    # Negative parallelisms - restructure
+    (r"\bnot only\s+([^.!?]{0,60})\s+but also\s+", r"\1 and "),
+    (r"\bnot just\s+([^.!?]{0,60})\s+but also\s+", r"\1 and "),
+    (r"\bnot a\s+([^.!?]{0,40})\s+but a\s+", r"\1 and "),
+    # Promotional language cleanup
+    (r"\bnestled in the heart of\b", "in"),
+    (r"\bnestled in\b", "in"),
+    (r"\bin the heart of\b", "in"),
+    (r"\bgroundbreaking\b", "new"),
+    (r"\brenowned\b", "known"),
+    (r"\bfeaturing a diverse array of\b", "with"),
+    (r"\bdiverse array of\b", "range of"),
+    (r"\bexemplifies\b", "shows"),
+    (r"\bcommitment to excellence\b", "focus on quality"),
+    (r"\bcommitment to\b", "focus on"),
+    (r"\bworld-class\b", "leading"),
+    (r"\bstate-of-the-art\b", "modern"),
+    (r"\bcutting-edge\b", "advanced"),
+    (r"\bpremier\b", "main"),
+    (r"\bleading provider of\b", "provider of"),
+    (r"\btailored\b", "custom"),
+    (r"\bempower(?:s|ed|ing)?\b", "support"),
+    (r"\bunlock(?:s|ed|ing)?\b", "open"),
+    (r"\bstreamlin(?:e|es|ed|ing)\b", "simplify"),
+    # Copulative avoidance
+    (r"\brefers to\b", "is"),
+    (r"\bis defined as\b", "is"),
+    (r"\bis known as\b", "is"),
+    (r"\bis described as\b", "is"),
+    # Challenges + future formula
+    (r"\bfuture outlook\b", "next steps"),
+    (r"\bfuture prospects\b", "next steps"),
+    (r"\bfuture directions\b", "next steps"),
+    (r"\bfuture implications\b", "effects"),
+    (r"\blooking ahead\b", ""),
+    (r"\bmoving forward\b", ""),
+    (r"\bchallenges and opportunities\b", "limits and options"),
+    (r"\bchallenges and future\b", "limits and next steps"),
+    (r"\bchallenges and legacy\b", "limits and history"),
+    # Section summary cleanup
+    (r"\bin short,?\s+", ""),
+    (r"\bto summarize,?\s+", ""),
+    (r"\bto sum up,?\s+", ""),
+    (r"\bwrapping up,?\s+", ""),
+    # Didactic disclaimer cleanup
+    (r"\bit's important to (?:note|remember|consider|understand) that\s+", ""),
+    (r"\bit is important to (?:remember|consider|understand) that\s+", ""),
+    (r"\bkeep in mind that\s+", ""),
+    (r"\bbear in mind that\s+", ""),
+    # Exaggerated notability
+    (r"\bwidely regarded as\b", "considered"),
+    (r"\bhighly acclaimed\b", "praised"),
+    (r"\bhighly respected\b", "respected"),
+    (r"\bhighly regarded\b", "regarded"),
+    (r"\bhighly sought\b", "sought"),
+    (r"\binternationally recognized\b", "known internationally"),
+    (r"\bglobally recognized\b", "known globally"),
+    # Knowledge cutoff
+    (r"\bwhile specific details are (?:limited|scarce)\b", "specific details are limited"),
+    (r"\bnot widely (?:available|documented|disclosed)\b", "not publicly available"),
+    (r"\bmaintains a low profile\b", "has limited public information"),
+    (r"\bkeeps (?:personal|private) details (?:private|under wraps)\b", "has limited public information"),
+    # Curly quote normalization
+    ("\u201c", '"'),
+    ("\u201d", '"'),
+    ("\u2018", "'"),
+    ("\u2019", "'"),
+    # Em dash replacement
+    ("\u2014", ","),
+    ("\u2013", ","),
+    # Placeholder cleanup
+    (r"\bXX-XX-XXXX\b", "[date]"),
+    (r"\bYYYY-MM-DD\b", "[date]"),
+    (r"\[insert citation\]", "[citation needed]"),
+    (r"\[insert reference\]", "[reference needed]"),
+    (r"\[insert name\]", "[name]"),
+    (r"\[insert date\]", "[date]"),
+    # ChatGPT markup cleanup
+    (r"\bcontentReference\[[\w:]+\]\{[^}]*\}", ""),
+    (r"\boai_citation:\d+\b", ""),
+    (r"\bgrok_card\b", ""),
+    (r"\bgrok_render_citation_card_json\([^)]*\)", ""),
+    (r"\bturn\dsearch\d\b", ""),
+    # Concrete overuse
+    (r"\bconcrete (example|evidence|steps|action|proof)\b", r"specific \1"),
+    # "Hence" / "consequently" / "thus" at sentence start
+    (r"^\s*hence,?\s+", ""),
+    (r"^\s*consequently,?\s+", ""),
+    (r"^\s*thus,?\s+", ""),
 ]
 
 TRANSPARENCY_COMPONENTS = [
@@ -406,6 +680,9 @@ def strip_chatbot_markup(text: str) -> str:
     text = re.sub(r"\[([^\]\n]+)\]\((?:https?://|/)[^)]+\)", r"\1", text)
     text = re.sub(r"(\*\*|__)([^*_`\n][^*_`\n]*?)\1", r"\2", text)
     text = re.sub(r"(?<!`)`([^`\n]+)`(?!`)", r"\1", text)
+    text = text.replace("\u201c", '"').replace("\u201d", '"')
+    text = text.replace("\u2018", "'").replace("\u2019", "'")
+    text = text.replace("\u2014", ",").replace("\u2013", ",")
     return apply_wikipedia_ai_style_guard(text)
 
 
@@ -635,6 +912,52 @@ class AcademicRevisionEngine:
         ]
         self.editorial_short_beats: List[str] = []
         self.editorial_question_added = False
+        self.surprise_word_map = {
+            "show": ["reveal", "indicate", "demonstrate", "document", "report"],
+            "find": ["identify", "observe", "detect", "note", "discover"],
+            "use": ["employ", "apply", "adopt", "utilize in limited contexts", "rely on"],
+            "make": ["produce", "generate", "yield", "create", "form"],
+            "give": ["provide", "offer", "supply", "present", "contribute"],
+            "help": ["support", "aid", "assist", "facilitate carefully", "enable"],
+            "change": ["alter", "modify", "shift", "transform", "adjust"],
+            "increase": ["raise", "elevate", "boost", "amplify", "grow"],
+            "decrease": ["reduce", "lower", "diminish", "cut", "shrink"],
+            "important": ["notable", "worth noting", "relevant", "meaningful", "consequential"],
+            "different": ["distinct", "varied", "divergent", "separate", "unlike"],
+            "large": ["substantial", "considerable", "sizable", "extensive", "ample"],
+            "small": ["modest", "limited", "minor", "slight", "narrow"],
+            "good": ["effective", "suitable", "appropriate", "favorable", "sound"],
+            "bad": ["poor", "inadequate", "deficient", "suboptimal", "limited"],
+            "new": ["recent", "novel", "current", "fresh", "updated"],
+            "old": ["previous", "earlier", "prior", "established", "existing"],
+            "many": ["numerous", "multiple", "several", "various", "a range of"],
+            "few": ["limited", "scant", "a handful of", "sparse", "a small number of"],
+            "likely": ["probable", "plausible", "expected", "anticipated", "reasonable to expect"],
+            "possible": ["feasible", "conceivable", "achievable", "viable", "attainable"],
+            "clear": ["evident", "apparent", "obvious in context", "plain", "transparent"],
+            "simple": ["straightforward", "uncomplicated", "direct", "basic", "elementary"],
+            "complex": ["intricate in structure", "multi-layered", "involved", "elaborate", "sophisticated"],
+            "fast": ["rapid", "swift", "quick", "expedient", "prompt"],
+            "slow": ["gradual", "progressive", "measured", "deliberate", "incremental"],
+        }
+        self.function_word_variants = {
+            "the": ["the", "this", "such", "the given", "the present"],
+            "a": ["a", "one", "any", "some"],
+            "is": ["is", "appears to be", "represents", "constitutes"],
+            "are": ["are", "appear to be", "constitute", "represent"],
+            "was": ["was", "proved to be", "emerged as"],
+            "were": ["were", "proved to be", "emerged as"],
+            "has": ["has", "possesses", "exhibits", "displays"],
+            "have": ["have", "possess", "exhibit", "display"],
+            "can": ["can", "is able to", "is capable of", "may"],
+            "will": ["will", "is expected to", "is likely to", "should"],
+            "this": ["this", "the current", "the present", "the following"],
+            "these": ["these", "the current", "the present", "the following"],
+            "that": ["that", "which", "the indicated"],
+            "which": ["which", "that", "a factor that"],
+            "it": ["it", "this", "the system", "the approach"],
+            "they": ["they", "these", "the results", "the findings"],
+        }
 
     def _build_synonym_map(self) -> Dict[str, str]:
         df = load_synonym_dictionary()
@@ -743,31 +1066,105 @@ class AcademicRevisionEngine:
         return normalize_spacing(revised)
 
     def engine2_burstiness_synthesizer(self, sentences: List[str]) -> List[str]:
-        """Adjust overly long sentences and avoid repeated adjacent sentence lengths."""
-        adjusted: List[str] = []
+        """Create natural sentence length variation that mimics human burstiness."""
+        if not sentences:
+            return sentences
+
+        # Step 1: Split overly long sentences
+        adjusted = []
         for sentence in sentences:
             adjusted.extend(self._split_long_sentence(sentence))
 
-        balanced: List[str] = []
-        previous_len: Optional[int] = None
+        # Step 2: Calculate current burstiness metrics
+        lengths = [len(tokenize_words(s)) for s in adjusted]
+        if not lengths:
+            return adjusted
+
+        avg_len = float(np.mean(lengths))
+        std_len = float(np.std(lengths))
+        cv = std_len / avg_len if avg_len > 0 else 0  # coefficient of variation
+
+        # Human writing typically has CV between 0.35-0.65
+        # AI writing typically has CV < 0.25
+        target_cv = 0.45 if self.intensity >= 3 else 0.35
+
+        # Step 3: If CV is too low (too uniform), inject variation
+        if cv < target_cv and len(adjusted) >= 3:
+            # Strategy A: Insert short beat sentences
+            short_beats = [
+                "This matters.",
+                "The evidence is clear.",
+                "We return to this below.",
+                "This warrants attention.",
+                "The pattern holds.",
+                "This is expected.",
+                "The reason is straightforward.",
+                "We note this finding.",
+                "This aligns with prior work.",
+                "The implication is direct.",
+            ]
+
+            domain_beats = {
+                "medical": [
+                    "The clinical picture is consistent.",
+                    "This aligns with current practice.",
+                    "The finding is reproducible.",
+                ],
+                "engineering": [
+                    "The measurement confirms this.",
+                    "This matches the model output.",
+                    "The design accounts for this.",
+                ],
+                "humanities": [
+                    "The text supports this reading.",
+                    "This interpretation holds.",
+                    "The argument follows.",
+                ],
+                "general": short_beats,
+            }
+
+            beats = domain_beats.get(self.domain, short_beats)
+
+            # Find good insertion points (after longer sentences)
+            beat_idx = 0
+            result = []
+            for i, sentence in enumerate(adjusted):
+                result.append(sentence)
+                word_count = len(tokenize_words(sentence))
+                # Insert a beat after a long sentence, but not too frequently
+                if (word_count >= avg_len and
+                    i < len(adjusted) - 1 and
+                    len(tokenize_words(adjusted[i+1])) >= avg_len * 0.8 and
+                    i % 3 == 1 and
+                    beat_idx < 2):  # Don't add too many beats
+                    result.append(beats[beat_idx % len(beats)])
+                    beat_idx += 1
+
+            adjusted = result
+
+        # Step 4: Break adjacent similar-length sentences
+        balanced = []
+        previous_len = None
         for sentence in adjusted:
-            words = sentence.split()
             current_len = len(tokenize_words(sentence))
-            if previous_len is not None and abs(current_len - previous_len) <= 2 and current_len > 18:
-                midpoint = max(10, len(words) // 2)
+            if previous_len is not None and abs(current_len - previous_len) <= 2 and current_len > 16:
+                # Try to split or merge to create variation
+                midpoint = max(8, len(sentence.split()) // 2)
+                words = sentence.split()
                 first = " ".join(words[:midpoint]).rstrip(" ,;")
                 second = " ".join(words[midpoint:]).strip(" ,;")
                 if first and second:
-                    if first[-1] not in ".!?؟":
+                    if first[-1] not in ".!?":
                         first += "."
                     second = second[:1].upper() + second[1:]
-                    if second[-1] not in ".!?؟":
+                    if second[-1] not in ".!?":
                         second += "."
                     balanced.extend([first, second])
                     previous_len = len(tokenize_words(second))
                     continue
             balanced.append(sentence)
             previous_len = current_len
+
         return balanced
 
     def engine3_style_variety_editor(self, sentences: List[str]) -> List[str]:
@@ -828,6 +1225,168 @@ class AcademicRevisionEngine:
                 sentence += "."
             checked.append(self._semantic_lock(original, sentence, threshold=0.55))
         return checked
+
+    def engine7_perplexity_variation(self, sentences: List[str]) -> List[str]:
+        """Vary word-level predictability by injecting less common alternatives."""
+        if self.intensity < 2:
+            return sentences
+
+        revised = []
+        word_counter = Counter(w.lower() for s in sentences for w in tokenize_words(s))
+        doc_len = sum(word_counter.values())
+
+        for idx, sentence in enumerate(sentences):
+            words = tokenize_words(sentence)
+            if not words:
+                revised.append(sentence)
+                continue
+
+            # Replace overused content words (appearing >2% of document)
+            changes = 0
+            max_changes = min(2, max(1, self.intensity - 1))
+            for i, word in enumerate(words):
+                if changes >= max_changes:
+                    break
+                lower = word.lower()
+                # Skip function words, short words, protected terms
+                if len(word) < 4 or lower in self.function_word_variants:
+                    continue
+                if word_counter[lower] / max(1, doc_len) > 0.02:
+                    alternatives = self.surprise_word_map.get(lower, [])
+                    if alternatives:
+                        alt = alternatives[idx % len(alternatives)]
+                        # Preserve case
+                        alt = preserve_case(word, alt)
+                        # Only substitute if it won't break grammar
+                        sentence = re.sub(rf"\b{re.escape(word)}\b", alt, sentence, count=1, flags=re.I)
+                        changes += 1
+
+            # Vary function words (every 4th sentence at intensity >= 3)
+            if self.intensity >= 3 and idx % 4 == 2:
+                for func_word, variants in self.function_word_variants.items():
+                    pattern = rf"\b{re.escape(func_word)}\b"
+                    if re.search(pattern, sentence, re.I):
+                        variant = variants[idx % len(variants)]
+                        if variant != func_word:
+                            sentence = re.sub(pattern, variant, sentence, count=1, flags=re.I)
+                        break
+
+            # Add hedging at sentence boundaries for overly certain claims (intensity >= 3)
+            if self.intensity >= 3 and idx % 5 == 3:
+                hedge_starters = [
+                    "It seems that", "We find that", "The data suggest",
+                    "In our assessment,", "Based on the evidence,",
+                ]
+                words_count = len(tokenize_words(sentence))
+                if words_count >= 12 and not any(sentence.strip().lower().startswith(h.lower()) for h in hedge_starters):
+                    starter = hedge_starters[idx % len(hedge_starters)]
+                    sentence = f"{starter} {sentence[:1].lower()}{sentence[1:]}"
+
+            sentence = normalize_spacing(sentence)
+            revised.append(sentence)
+
+        return revised
+
+    def engine8_punctuation_entropy(self, sentences: List[str]) -> List[str]:
+        """Increase punctuation diversity to break AI-like uniformity."""
+        if self.intensity < 2:
+            return sentences
+
+        revised = []
+        for idx, sentence in enumerate(sentences):
+            # Insert parenthetical aside every ~6 sentences at intensity >= 3
+            if self.intensity >= 3 and idx % 6 == 4 and len(tokenize_words(sentence)) >= 14:
+                words = sentence.split()
+                midpoint = len(words) // 2
+                # Find a good insertion point near midpoint
+                insert_at = midpoint
+                for i in range(midpoint, min(midpoint + 4, len(words))):
+                    if words[i].endswith(","):
+                        insert_at = i + 1
+                        break
+
+                parentheticals = [
+                    "(as expected)",
+                    "(see below)",
+                    "(in this context)",
+                    "(for the present study)",
+                    "(under these conditions)",
+                    "(as reported earlier)",
+                ]
+                words.insert(insert_at, parentheticals[idx % len(parentheticals)])
+                sentence = " ".join(words)
+
+            # Replace some commas with semicolons where grammatically appropriate (intensity >= 4)
+            if self.intensity >= 4 and idx % 7 == 3 and ", " in sentence:
+                # Only replace if the comma separates two independent clauses
+                parts = sentence.split(", ", 1)
+                if len(parts) == 2 and len(tokenize_words(parts[0])) >= 5:
+                    # Check if first part could stand alone (has a verb)
+                    if re.search(r"\b(is|are|was|were|has|have|had|shows?|indicates?|suggests?|finds?|yields?|reports?)\b", parts[0], re.I):
+                        sentence = "; ".join(parts)
+
+            # Add occasional colon usage for lists/explanations
+            if self.intensity >= 3 and idx % 8 == 5:
+                colon_patterns = [
+                    (r"\bas follows[: ]", "as follows: "),
+                    (r"\bnamely\s+", "namely, "),
+                ]
+                for pattern, replacement in colon_patterns:
+                    if re.search(pattern, sentence, re.I):
+                        sentence = re.sub(pattern, replacement, sentence, count=1, flags=re.I)
+                        break
+
+            revised.append(normalize_spacing(sentence))
+
+        return revised
+
+    def engine9_lexical_diversity_injector(self, sentences: List[str]) -> List[str]:
+        """Reduce word repetition by replacing repeated content words with synonyms."""
+        if self.intensity < 2:
+            return sentences
+
+        # Count all words across sentences
+        all_words = [w.lower() for s in sentences for w in tokenize_words(s)]
+        word_freq = Counter(all_words)
+        total_words = len(all_words)
+
+        # Track which replacements we've made to avoid re-replacing
+        replaced = set()
+        revised = []
+
+        for idx, sentence in enumerate(sentences):
+            words = tokenize_words(sentence)
+            changes = 0
+            max_changes = 2 if self.intensity >= 4 else 1
+
+            for word in words:
+                if changes >= max_changes:
+                    break
+                lower = word.lower()
+                # Only replace content words that appear >3 times and >1.5% of doc
+                if len(word) < 5 or lower in replaced:
+                    continue
+                if word_freq[lower] >= 3 and (word_freq[lower] / max(1, total_words)) > 0.015:
+                    alternatives = self.surprise_word_map.get(lower, [])
+                    if alternatives:
+                        alt = alternatives[(idx + hash(lower)) % len(alternatives)]
+                        alt = preserve_case(word, alt)
+                        sentence = re.sub(rf"\b{re.escape(word)}\b", alt, sentence, count=1, flags=re.I)
+                        replaced.add(lower)
+                        changes += 1
+
+            revised.append(normalize_spacing(sentence))
+
+        return revised
+
+    def engine10_tortured_phrase_fixer(self, sentences: List[str]) -> List[str]:
+        """Replace tortured/awkward AI paraphrases with natural phrasing."""
+        revised = []
+        for sentence in sentences:
+            for pattern, replacement in TORTURED_PHRASES:
+                sentence = re.sub(pattern, replacement, sentence, flags=re.I)
+            revised.append(normalize_spacing(sentence))
+        return revised
 
     def _split_long_sentence(self, sentence: str) -> List[str]:
         words = tokenize_words(sentence)
@@ -930,11 +1489,25 @@ class AcademicRevisionEngine:
     def revise_paragraph(self, paragraph: str, context: Sequence[str] | None = None) -> str:
         sentences = split_sentences(paragraph)
         context = list(context or [])
-        working = [self.engine1_perplexity_injector(sentence) for sentence in sentences]
+        # Engine 10: Fix tortured phrases first
+        working = self.engine10_tortured_phrase_fixer(sentences)
+        # Engine 1: Perplexity injector
+        working = [self.engine1_perplexity_injector(sentence) for sentence in working]
+        # Engine 2: Burstiness synthesizer (enhanced)
         working = self.engine2_burstiness_synthesizer(working)
+        # Engine 9: Lexical diversity injector
+        working = self.engine9_lexical_diversity_injector(working)
+        # Engine 7: Perplexity variation
+        working = self.engine7_perplexity_variation(working)
+        # Engine 8: Punctuation entropy
+        working = self.engine8_punctuation_entropy(working)
+        # Engine 3: Style variety editor
         working = self.engine3_style_variety_editor(working)
+        # Engine 4: Semantic deepener
         working = self.engine4_semantic_deepener(working)
+        # Engine 5: Structure regularizer
         working = self.engine5_structure_regularizer(working)
+        # Engine 6: Coherence checker
         working = self.engine6_coherence_checker(sentences, working)
 
         if self._flow_is_extreme(working):
@@ -965,6 +1538,9 @@ class AcademicRevisionEngine:
 
     def run(self) -> str:
         text = strip_chatbot_markup(self.original_text)
+        # Fix tortured phrases first
+        for pattern, replacement in TORTURED_PHRASES:
+            text = re.sub(pattern, replacement, text, flags=re.I)
         protected, fragments = self._protect_fragments(text)
         paragraphs = [part.strip() for part in re.split(r"\n\s*\n", protected) if part.strip()]
         revised = []
@@ -999,6 +1575,10 @@ class ArabicEditorialRevisionEngine:
         r"تجدر الإشارة إلى أن?\s*",
         r"ومن الجدير بالذكر أن?\s*",
         r"كما يجب التنويه إلى أن?\s*",
+        r"في الختام[،,]?\s*",
+        r"بشكل عام[،,]?\s*",
+        r"من الجدير بالذكر أن?\s*",
+        r"كما تجدر الإشارة إلى أن?\s*",
     ]
     vocabulary_swaps = [
         (r"\bبشكل واضح\b", "بجلاء"),
@@ -1020,6 +1600,13 @@ class ArabicEditorialRevisionEngine:
         (r"\bالعامل\b", "المؤثر"),
         (r"\bعدد كبير من\b", "طيف واسع من"),
         (r"\bبشكل عام\b", "في المشهد الأوسع"),
+        (r"\bفريد من نوعه\b", "نادر"),
+        (r"\bاستثنائي\b", "لافت"),
+        (r"\bمتطور\b", "حديث"),
+        (r"\bبشكل ملموس\b", "عمليًا"),
+        (r"\bعلى المستوى العالمي\b", "عالميًا"),
+        (r"\bرائد في مجاله\b", "معروف في مجاله"),
+        (r"\bبشكل استثنائي\b", "كثيرًا"),
     ]
     passive_rewrites = [
         (r"\bتمت دراسة\b", "تعاين الدراسة"),
@@ -1042,6 +1629,37 @@ class ArabicEditorialRevisionEngine:
         "الأمر ليس عابراً.",
         "هذه ليست زينة.",
     ]
+    # Morphological variation dictionary
+    morphological_variants = [
+        (r"\bيُعَدُّ\b", "يُعتبر"),
+        (r"\bيُعتبر\b", "يُعد"),
+        (r"\bيتميز بـ\b", "يتسم بـ"),
+        (r"\bيتسم بـ\b", "يتميز بـ"),
+        (r"\bيساهم في\b", "يغذي"),
+        (r"\bيؤدي إلى\b", "يُفضي إلى"),
+        (r"\bيُفضي إلى\b", "يؤدي إلى"),
+        (r"\bيركز على\b", "يقترب من"),
+        (r"\bيتناول\b", "يعالج"),
+        (r"\bيعالج\b", "يتناول"),
+    ]
+    # Diglossic insertion patterns (add slight colloquial touch for natural feel)
+    diglossic_insertions = [
+        "في الواقع،",
+        "عمليًا،",
+        "على أرض الواقع،",
+        "بعبارة أخرى،",
+    ]
+    # Arabic burstiness short beats
+    arabic_short_beats = [
+        "هذا جوهري.",
+        "الأمر واضح.",
+        "هنا تكمن المسألة.",
+        "لا التباس في ذلك.",
+        "هذا يتكرر.",
+        "النتيجة حاسمة.",
+    ]
+    # Diacritics-aware handling
+    arabic_diacritics_pattern = re.compile(r"[\u0610-\u061A\u064B-\u065F\u0670]")
 
     def __init__(self, intensity: int, text: str, preserve_word_count: bool) -> None:
         self.intensity = intensity
@@ -1077,7 +1695,37 @@ class ArabicEditorialRevisionEngine:
     def _activate_voice(self, sentence: str) -> str:
         for pattern, replacement in self.passive_rewrites:
             sentence = re.sub(pattern, replacement, sentence)
+        # Apply morphological variants at higher intensity
+        if self.intensity >= 3:
+            for pattern, replacement in self.morphological_variants:
+                if re.search(pattern, sentence):
+                    sentence = re.sub(pattern, replacement, sentence, count=1)
+                    break  # Only one variant per sentence
         return normalize_spacing(sentence)
+
+    def _inject_burstiness(self, sentences: List[str]) -> List[str]:
+        """Insert short Arabic beats between long sentences for natural burstiness."""
+        if not sentences or len(sentences) < 3:
+            return sentences
+
+        lengths = [len(tokenize_words(s)) for s in sentences]
+        avg_len = sum(lengths) / len(lengths) if lengths else 0
+
+        result = []
+        beat_idx = 0
+        for i, sentence in enumerate(sentences):
+            result.append(sentence)
+            word_count = lengths[i]
+            # Insert a beat after a long sentence at intervals
+            if (self.intensity >= 3 and
+                word_count >= avg_len and
+                i < len(sentences) - 1 and
+                i % 3 == 1 and
+                beat_idx < 2):
+                result.append(self.arabic_short_beats[beat_idx % len(self.arabic_short_beats)])
+                beat_idx += 1
+
+        return result
 
     def _shape_rhythm(self, sentences: List[str]) -> List[str]:
         if len(sentences) < 2:
@@ -1109,18 +1757,29 @@ class ArabicEditorialRevisionEngine:
         sentences = self._split_arabic_sentences(paragraph)
         revised: List[str] = []
         for index, sentence in enumerate(sentences):
+            # Fix tortured phrases first
+            for pattern, replacement in TORTURED_PHRASES:
+                sentence = re.sub(pattern, replacement, sentence, flags=re.I)
             sentence = self._clean_mechanical_transitions(sentence)
             sentence = self._activate_voice(sentence)
             sentence = self._enrich_vocabulary(sentence, index)
+            # Add diglossic insertions at higher intensity
+            if self.intensity >= 4 and index % 5 == 2 and len(tokenize_words(sentence)) >= 10:
+                insertion = self.diglossic_insertions[index % len(self.diglossic_insertions)]
+                sentence = f"{insertion} {sentence[:1].lower()}{sentence[1:]}" if sentence[0].isupper() else f"{insertion} {sentence}"
             if sentence and sentence[-1] not in ".!?؟":
                 sentence += "."
             revised.append(sentence)
+        revised = self._inject_burstiness(revised)
         revised = self._shape_rhythm(revised)
         revised = self._add_mid_text_question(revised)
         return normalize_spacing(" ".join(revised))
 
     def run(self) -> str:
         text = strip_chatbot_markup(self.original_text)
+        # Fix tortured phrases first
+        for pattern, replacement in TORTURED_PHRASES:
+            text = re.sub(pattern, replacement, text, flags=re.I)
         paragraphs = [part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()]
         revised = [self.revise_paragraph(paragraph) for paragraph in paragraphs]
         final_text = "\n\n".join(revised)
@@ -1500,6 +2159,82 @@ def isolate_qualifying_text(text: str) -> Tuple[str, Counter]:
     return normalize_spacing(" ".join(long_sentences)), excluded
 
 
+def detect_em_dash_overuse(text: str, threshold: float = 0.025) -> Tuple[float, int]:
+    """Count em dash density. Returns (density, count)."""
+    em_dashes = text.count("\u2014") + text.count("\u2013")
+    words = tokenize_words(text)
+    density = em_dashes / max(1, len(words))
+    return density, em_dashes
+
+
+def detect_curly_quotes(text: str) -> Tuple[int, int]:
+    """Count curly double and single quotes. Returns (double_count, single_count)."""
+    double = text.count("\u201c") + text.count("\u201d")
+    single = text.count("\u2018") + text.count("\u2019")
+    return double, single
+
+
+def detect_title_case_headings(text: str) -> int:
+    """Count lines that look like title-case headings (3+ content words capitalized)."""
+    count = 0
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        # Skip very short lines, lines ending with punctuation
+        if len(stripped) < 10 or stripped[-1] in ".!?؛،":
+            continue
+        words = stripped.split()
+        if len(words) < 3:
+            continue
+        # Count words that start with uppercase (not first word, not small words)
+        small_words = {"a", "an", "the", "and", "but", "or", "for", "nor", "in", "on", "at", "to", "by", "of", "with", "as", "is", "are"}
+        capitalized_content = sum(
+            1 for i, w in enumerate(words)
+            if i > 0 and w[0].isupper() and w.lower() not in small_words
+        )
+        if capitalized_content >= 3:
+            count += 1
+    return count
+
+
+def detect_rule_of_three(text: str) -> int:
+    """Count comma-separated triplets of similar structure (adjective, adjective, and adjective)."""
+    pattern = re.compile(
+        r"\b(\w+),\s+(\w+),\s+and\s+(\w+)\b",
+        re.I,
+    )
+    return len(pattern.findall(text))
+
+
+def detect_placeholder_text(text: str) -> int:
+    """Count placeholder patterns like [insert X], XX-XX-XXXX, etc."""
+    patterns = [
+        r"\[insert\s+\w+\]",
+        r"XX-XX-XXXX",
+        r"YYYY-MM-DD",
+        r"\[citation needed\]",
+        r"\[insert citation\]",
+        r"\[insert reference\]",
+        r"\[insert name\]",
+        r"\[insert date\]",
+    ]
+    return sum(len(re.findall(p, text, re.I)) for p in patterns)
+
+
+def detect_markdown_remnants(text: str) -> int:
+    """Count Markdown formatting that shouldn't be in academic prose."""
+    patterns = [
+        r"(?m)^\s*#{1,6}\s+\S",
+        r"\*\*[^*\n]+\*\*",
+        r"__[^_\n]+__",
+        r"(?m)^\s*[-*]\s+\S",
+        r"```",
+        r"\[[^\]\n]+\]\(https?://[^)]+\)",
+    ]
+    return sum(len(re.findall(p, text)) for p in patterns)
+
+
 def academic_section_notes(text: str) -> Tuple[Tuple[str, ...], float]:
     sections: Counter = Counter()
     active_section: Optional[str] = None
@@ -1545,6 +2280,45 @@ def source_code_alerts(text: str) -> Tuple[str, ...]:
         alerts.append("توجد صياغة إثبات ملحوظية/تغطية إعلامية شائعة في النصوص الآلية؛ تحقق من المصدر والمعنى قبل الإبقاء عليها.")
     if re.search(r"\b(?:algorithm|pseudocode|خوارزمية)\b", text, flags=re.I):
         alerts.append("يوجد وصف خوارزمي؛ راجع توافقه مع المصادر أو المستودعات المفتوحة يدويًا.")
+
+    # Curly quote detection
+    curly_double, curly_single = detect_curly_quotes(text)
+    if curly_double or curly_single:
+        alerts.append(f"تم رصد {curly_double + curly_single} علامة اقتباس منحنية؛ الشائع في مخرجات ChatGPT وDeepSeek. يفضل استخدام علامات الاقتباس المستقيمة.")
+
+    # Placeholder text
+    placeholders = detect_placeholder_text(text)
+    if placeholders:
+        alerts.append(f"تم رصد {placeholders} نمط نص نائب (placeholder)؛ هذه تحتاج تعبئة يدوية أو حذف.")
+
+    # Em dash overuse
+    density, count = detect_em_dash_overuse(text)
+    if density > 0.025 and count >= 3:
+        alerts.append(f"كثافة الشرطة الطويلة (em dash) مرتفعة ({count} شرطة)؛ الشائع البشري هو الفاصلة أو الأقواس. يفضل الاستبدال بفواصل.")
+
+    # Title case headings
+    title_case_count = detect_title_case_headings(text)
+    if title_case_count >= 2:
+        alerts.append(f"تم رصد {title_case_count} عنوان بحالة العنوان (Title Case)؛ الشائع في الكتابة الأكاديمية هو حالة الجملة (Sentence case).")
+
+    # Negative parallelisms
+    negative_parallel_count = count_pattern_matches(text, [
+        r"\bnot only\b[^.!?]{0,60}\bbut also\b",
+        r"\bnot just\b[^.!?]{0,60}\bbut also\b",
+    ])
+    if negative_parallel_count >= 2:
+        alerts.append(f"تم رصد {negative_parallel_count} تركيب نفي مقابل (not only... but also)؛ هذا نمط آلي شائع يفضل تبسيطه.")
+
+    # Rule of three
+    rule_of_three_count = detect_rule_of_three(text)
+    if rule_of_three_count >= 3:
+        alerts.append(f"تم رصد {rule_of_three_count} تركيبات ثلاثية (قاعدة الثلاثة)؛ الاستخدام المتكرر نمط آلي شائع.")
+
+    # Markdown remnants
+    md_count = detect_markdown_remnants(text)
+    if md_count >= 3:
+        alerts.append(f"تم رصد {md_count} أثر تنسيق Markdown داخل النص؛ راجعها إذا كان النص موجهاً لصيغة أكاديمية.")
+
     return tuple(dict.fromkeys(alerts))
 
 
@@ -1636,6 +2410,70 @@ def sentence_signal_score(sentence: str, avg_length: float, vocabulary_hits: Cou
         score += 0.10
         reasons.append("جملة طويلة ومصقولة جدًا")
 
+    # Negative parallelism detection
+    negative_parallel = count_pattern_matches(
+        sentence,
+        [
+            r"\bnot only\b[^.!?]{0,60}\bbut also\b",
+            r"\bnot just\b[^.!?]{0,60}\bbut also\b",
+            r"\bnot a\b[^.!?]{0,40}\bbut a\b",
+        ],
+    )
+    if negative_parallel:
+        score += 0.20
+        reasons.append("تركيب نفي مقابل")
+
+    # Rule of three in sentence
+    if re.search(r"\b(\w+),\s+(\w+),\s+and\s+(\w+)\b", sentence, re.I):
+        score += 0.08
+        reasons.append("قاعدة الثلاثة")
+
+    # Promotional language
+    promotional = count_pattern_matches(
+        sentence,
+        [
+            r"\bnestled in\b",
+            r"\bgroundbreaking\b",
+            r"\brenowned\b",
+            r"\bdiverse array\b",
+            r"\bexemplifies\b",
+            r"\bcommitment to\b",
+            r"\bworld-class\b",
+            r"\bstate-of-the-art\b",
+            r"\bcutting-edge\b",
+            r"\bpremier\b",
+            r"\bempower\b",
+            r"\bunlock\b",
+            r"\bstreamline\b",
+        ],
+    )
+    if promotional:
+        score += min(0.22, 0.11 * promotional)
+        reasons.append("لغة ترويجية")
+
+    # Copulative avoidance
+    copulative_avoid = count_pattern_matches(
+        sentence,
+        [r"\brefers to\b", r"\bis defined as\b", r"\bis known as\b"],
+    )
+    if copulative_avoid:
+        score += 0.12
+        reasons.append("تجنب الفعل 'يكون'")
+
+    # Challenges + future formula
+    challenges_formula = count_pattern_matches(
+        sentence,
+        [
+            r"\bfuture (?:outlook|prospects|directions|implications)\b",
+            r"\blooking ahead\b",
+            r"\bmoving forward\b",
+            r"\bchallenges and (?:opportunities|future|legacy)\b",
+        ],
+    )
+    if challenges_formula:
+        score += 0.16
+        reasons.append("صيغة التحديات والمستقبل")
+
     if not reasons:
         reasons.append("إشارة منخفضة")
 
@@ -1720,6 +2558,71 @@ def compute_transparency_report(text: str) -> TransparencyReport:
     confidence = 0.0 if not analysis_text else review_score
     source_alerts = source_code_alerts(normalized)
 
+    # Structural pattern alerts
+    structural_notes: List[str] = []
+    em_density, em_count = detect_em_dash_overuse(normalized)
+    if em_density > 0.02 and em_count >= 2:
+        structural_notes.append("كثافة الشرطة الطويلة مرتفعة في النص الأصلي.")
+    curly_d, curly_s = detect_curly_quotes(normalized)
+    if curly_d + curly_s >= 2:
+        structural_notes.append("توجد علامات اقتباس منحنية شائعة في مخرجات الذكاء الاصطناعي.")
+    tc_headings = detect_title_case_headings(normalized)
+    if tc_headings >= 2:
+        structural_notes.append("عناوين بحالة العنوان (Title Case) تظهر بشكل متكرر.")
+    r3_count = detect_rule_of_three(normalized)
+    if r3_count >= 3:
+        structural_notes.append("التركيبات الثلاثية المتكررة (قاعدة الثلاثة) نمط آلي شائع.")
+    placeholder_count = detect_placeholder_text(normalized)
+    if placeholder_count:
+        structural_notes.append(f"يوجد {placeholder_count} نمط نص نائب يحتاج مراجعة.")
+
+    # Enhanced detection metrics
+    # Type-token ratio
+    ttr = len(set(word.lower() for word in words)) / len(words) if words else 0.0
+
+    # Punctuation entropy
+    punct_chars = [c for c in analysis_text if c in ".,;:!?()-—–\"'"]
+    punct_counter = Counter(punct_chars)
+    punct_entropy = 0.0
+    total_punct = sum(punct_counter.values())
+    if total_punct > 0:
+        for count in punct_counter.values():
+            p = count / total_punct
+            if p > 0:
+                punct_entropy -= p * np.log2(p)
+
+    # Function word bigram analysis
+    function_words = {"the", "a", "an", "is", "are", "was", "were", "has", "have", "had",
+                      "can", "could", "will", "would", "shall", "should", "may", "might",
+                      "must", "it", "this", "that", "these", "those", "which", "who",
+                      "whom", "whose", "of", "in", "to", "for", "with", "on", "at", "by",
+                      "from", "as", "into", "through", "during", "before", "after"}
+    fw_bigrams = Counter()
+    word_list = [w.lower() for w in words]
+    for i in range(len(word_list) - 1):
+        if word_list[i] in function_words and word_list[i+1] in function_words:
+            fw_bigrams[(word_list[i], word_list[i+1])] += 1
+    fw_bigram_concentration = sum(c for _, c in fw_bigrams.most_common(3)) / max(1, sum(fw_bigrams.values())) if fw_bigrams else 0.0
+
+    # Tortured phrase detection
+    tortured_count = count_pattern_matches(analysis_text, [p for p, _ in TORTURED_PHRASES])
+    if tortured_count > 0:
+        structural_notes.append(f"تم رصد {tortured_count} عبارة متعذرة (tortured phrases)؛ هذه صياغات آلية غير طبيعية ويجب استبدالها.")
+
+    # Low punctuation entropy alert
+    if punct_entropy < 1.5 and total_punct >= 5:
+        structural_notes.append("تنوع علامات الترقيم منخفض (punctuation entropy)؛ النصوص البشرية تستخدم تنوعًا أكبر في الترقيم.")
+
+    # High function word bigram concentration alert
+    if fw_bigram_concentration > 0.6 and len(fw_bigrams) >= 5:
+        structural_notes.append("تركيز عالي في أزواج الكلمات الوظيفية (function word bigrams)؛ نمط شائع في النصوص الآلية.")
+
+    # Low type-token ratio alert
+    if ttr < 0.4 and len(words) >= 50:
+        structural_notes.append(f"نسبة تنوع المفردات (TTR) منخفضة ({ttr:.2f})؛ يشير إلى تكرار مفرداتي أعلى من المتوقع.")
+
+    section_notes = tuple(section_notes) + tuple(structural_notes)
+
     return TransparencyReport(
         chars=len(normalized),
         words=len(tokenize_words(normalized)),
@@ -1745,6 +2648,7 @@ def compute_transparency_report(text: str) -> TransparencyReport:
         source_code_alerts=source_alerts,
         section_notes=section_notes,
         model_update_note="مؤشر محلي قابل للتحديث: راجع قاموس الأنماط دوريًا، ويفضل كل 90 يومًا إذا تغيرت نماذج الكتابة أو سياسة المجلة.",
+        structural_alerts=tuple(structural_notes),
     )
 
 
@@ -1919,6 +2823,40 @@ def compute_stats(original: str, revised: str) -> RevisionStats:
     certainty_count = count_pattern_matches(revised, CERTAINTY_PATTERNS)
     avg_length = float(np.mean(sentence_lengths)) if sentence_lengths else 0.0
     sentence_variation = float(np.std(sentence_lengths) / avg_length) if avg_length else 0.0
+
+    # Type-token ratio
+    ttr = len(set(revised_words)) / len(revised_words) if revised_words else 0.0
+
+    # Punctuation entropy
+    punct_chars = [c for c in revised if c in ".,;:!?()-—–\"'"]
+    punct_counter = Counter(punct_chars)
+    punct_entropy = 0.0
+    total_punct = sum(punct_counter.values())
+    if total_punct > 0:
+        for count in punct_counter.values():
+            p = count / total_punct
+            if p > 0:
+                punct_entropy -= p * np.log2(p)
+
+    # Function word bigram analysis
+    function_words_set = {"the", "a", "an", "is", "are", "was", "were", "has", "have", "had",
+                          "can", "could", "will", "would", "shall", "should", "may", "might",
+                          "must", "it", "this", "that", "these", "those", "which", "who",
+                          "whom", "whose", "of", "in", "to", "for", "with", "on", "at", "by",
+                          "from", "as", "into", "through", "during", "before", "after"}
+    fw_bigrams = Counter()
+    word_list = [w.lower() for w in tokenize_words(revised)]
+    for i in range(len(word_list) - 1):
+        if word_list[i] in function_words_set and word_list[i+1] in function_words_set:
+            fw_bigrams[(word_list[i], word_list[i+1])] += 1
+    fw_bigram_concentration = sum(c for _, c in fw_bigrams.most_common(3)) / max(1, sum(fw_bigrams.values())) if fw_bigrams else 0.0
+
+    # Tortured phrase detection
+    tortured_count = count_pattern_matches(revised, [p for p, _ in TORTURED_PHRASES])
+
+    # Burstiness CV
+    burstiness_cv = sentence_variation  # CV is already the burstiness measure
+
     return RevisionStats(
         words_original=len(original_words),
         words_revised=len(revised_words),
@@ -1930,6 +2868,11 @@ def compute_stats(original: str, revised: str) -> RevisionStats:
         certainty_marker_count=certainty_count,
         sentence_length_variation=sentence_variation,
         authorship_review_band=authorship_review_band(formulaic_count, certainty_count, sentence_variation),
+        type_token_ratio=ttr,
+        punctuation_entropy=punct_entropy,
+        function_word_bigram_concentration=fw_bigram_concentration,
+        tortured_phrase_count=tortured_count,
+        burstiness_cv=burstiness_cv,
     )
 
 
@@ -1987,7 +2930,7 @@ defaults = {
     "domain": "general",
     "intensity": 2,
     "preserve_word_count": True,
-    "stats": RevisionStats(0, 0, 0, 0.0, 0.0, 0.0, 0, 0, 0.0, "غير محسوب"),
+    "stats": RevisionStats(0, 0, 0, 0.0, 0.0, 0.0, 0, 0, 0.0, "غير محسوب", 0.0, 0.0, 0.0, 0, 0.0),
     "transparency_report": compute_transparency_report(""),
     "processed_source_text": "",
     "external_detector_report": "",
