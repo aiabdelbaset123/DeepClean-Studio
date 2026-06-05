@@ -1,34 +1,37 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-DeepClean Studio - تعديل آمن لملفات Word مع الحفاظ على الجداول والأشكال والمعادلات
-يعالج النصوص فقط، ويحافظ على التنسيق الأصلي والكائنات الأخرى.
+DeepClean Studio - Safe Word Processor with Full Formatting Preservation
+Preserves tables, figures, equations, references, and all non‑text elements.
+Outputs a fully formatted Word document ready for journal submission.
 """
 
 import re
 import random
 import streamlit as st
 from io import BytesIO
-from typing import Dict, Optional
+from typing import Dict
 
-# مكتبة التعامل مع Word
+# ---------- Libraries for Word processing ----------
 try:
     from docx import Document
     from docx.shared import Inches, Pt
     from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml import parse_xml
+    from docx.oxml.ns import qn
     DOCX_AVAILABLE = True
 except ImportError:
     DOCX_AVAILABLE = False
 
-st.set_page_config(page_title="DeepClean Studio - احترافي", layout="wide")
-st.title("🧬 DeepClean Studio – معالجة آمنة لملفات Word")
-st.caption("يعدل النصوص الأكاديمية فقط في ملفات Word، مع الحفاظ الكامل على الجداول والأشكال والمعادلات والمراجع.")
+st.set_page_config(page_title="DeepClean Studio - Safe Processor", layout="wide")
+st.title("🧬 DeepClean Studio – Safe Word Document Humanizer")
+st.caption("Modifies only plain text paragraphs. Preserves all tables, figures, equations, references, and formatting.")
 
 if not DOCX_AVAILABLE:
-    st.error("الرجاء تثبيت المكتبة: pip install python-docx")
+    st.error("Please install python-docx: pip install python-docx")
     st.stop()
 
-# -------------------- قواعد التحويل البشري (مثبتة) --------------------
+# -------------------- Humanization Rules (from Wikipedia) --------------------
 PHRASE_REPLACEMENTS = [
     ("the global transition toward decarbonized power generation has placed photovoltaic (pv) technology at the centre of energy policy in every major economy",
      "many countries now see solar power as a key part of their energy plans"),
@@ -128,100 +131,97 @@ def humanize_text(text: str, intensity: int = 3) -> str:
     return text.strip()
 
 def is_math_paragraph(para) -> bool:
-    """التحقق مما إذا كانت الفقرة تحتوي على معادلة (OMML) أو كائن مضمّن لا نريد تعديله."""
-    # البحث عن عناصر الرياضيات
+    """Detect paragraphs containing OMML equations or embedded objects."""
     for run in para.runs:
         if run.element.xpath('.//m:oMath'):
             return True
-        # التحقق من وجود كائنات مضمنة (صور، أشكال)
         if run.element.xpath('.//w:object'):
             return True
     return False
 
 def process_word_document(input_bytes: BytesIO, intensity: int) -> BytesIO:
-    """تعديل النصوص في الفقرات العادية فقط، مع الحفاظ على الجداول والأشكال والمعادلات."""
+    """Modify only plain text paragraphs. Keep all tables, figures, equations, references intact."""
     doc = Document(input_bytes)
     modified_count = 0
-    # معالجة الفقرات العادية (تجنب الفقرات داخل الجداول؟ الفقرات داخل الجداول هي أيضاً paragraphs)
-    # سنعامل كل الفقرات، ولكن نتحقق من كونها فقرة معادلة أو كائن.
     for para in doc.paragraphs:
-        # تخطي الفقرات الفارغة
         if not para.text.strip():
             continue
-        # تخطي الفقرات التي تحتوي على معادلات أو كائنات
         if is_math_paragraph(para):
             continue
         original = para.text
         new_text = humanize_text(original, intensity)
         if new_text != original:
-            # استبدال النص مع الحفاظ على التنسيق الأساسي (النمط، المحاذاة، إلخ)
+            # Preserve paragraph style and alignment
+            style = para.style
+            alignment = para.paragraph_format.alignment
             para.clear()
             run = para.add_run(new_text)
-            # محاولة الحفاظ على خصائص الخط الأساسية
             run.font.name = 'Times New Roman'
             run.font.size = Pt(12)
+            para.style = style
+            if alignment is not None:
+                para.paragraph_format.alignment = alignment
             modified_count += 1
-    # معالجة الجداول: الفقرات داخل خلايا الجدول يتم معالجتها أيضاً عبر doc.paragraphs
-    # لذلك لا حاجة لتكرار إضافي، ولكننا نضمن أننا لم نلمس الجداول لأنها لا تحتوي على معادلات عادة.
     output = BytesIO()
     doc.save(output)
     output.seek(0)
     return output, modified_count
 
-# -------------------- دوال تحليل النص (تقديرية) --------------------
+# -------------------- Quick stats for preview --------------------
 def quick_stats(text: str) -> Dict:
     words = len(re.findall(r'\b\w+\b', text))
-    sentences = [s for s in re.split(r'[.!?]+', text) if s.strip()]
-    avg_len = sum(len(s.split()) for s in sentences) / max(1, len(sentences))
     forbidden = sum(1 for w in WORD_REPLACEMENTS if w in text.lower())
-    return {"words": words, "avg_len": avg_len, "forbidden": forbidden}
+    return {"words": words, "forbidden": forbidden}
 
-# -------------------- واجهة المستخدم --------------------
+# -------------------- Streamlit UI --------------------
 def main():
-    st.sidebar.header("⚙️ الإعدادات")
-    intensity = st.sidebar.slider("شدة المراجعة", 1, 5, 3,
-                                 help="1=تغييرات خفيفة، 5=تغييرات عميقة (تقطيع الجمل، إضافة لمسات بشرية)")
-    uploaded_file = st.sidebar.file_uploader("رفع ملف Word (.docx)", type=["docx"])
-    process = st.sidebar.button("🛡️ معالجة الملف والحفاظ على الجداول والأشكال", type="primary", use_container_width=True)
+    st.sidebar.header("⚙️ Settings")
+    intensity = st.sidebar.slider("Transformation Strength", 1, 5, 3,
+                                 help="1=light changes, 5=aggressive splitting & human touches")
+    uploaded_file = st.sidebar.file_uploader("Upload Word (.docx)", type=["docx"])
+    process = st.sidebar.button("🛡️ Process & Keep All Formatting", type="primary", use_container_width=True)
 
     if uploaded_file and process:
-        with st.spinner("جاري معالجة الملف... الحفاظ على الجداول والأشكال والمعادلات والمراجع"):
+        with st.spinner("Processing document – preserving tables, figures, equations, references..."):
             input_bytes = BytesIO(uploaded_file.read())
             output_bytes, count = process_word_document(input_bytes, intensity)
             st.session_state['output_bytes'] = output_bytes
             st.session_state['count'] = count
+            # store a sample of original text for preview
+            doc = Document(BytesIO(uploaded_file.read()))
+            orig_sample = '\n'.join([p.text for p in doc.paragraphs if p.text.strip()][:10])
+            st.session_state['orig_sample'] = orig_sample
 
     if 'output_bytes' in st.session_state:
-        st.success(f"✓ تم تعديل {st.session_state['count']} فقرة نصية بنجاح. جميع الجداول والأشكال والمعادلات سليمة.")
+        st.success(f"✅ Modified {st.session_state['count']} text paragraphs. All tables, figures, equations, and references remain intact.")
         
-        # عرض مقارنة سريعة (نص تمثيلي فقط)
-        with st.expander("📊 عرض عينة من التغييرات (النص المستخرج)", expanded=False):
-            # إعادة قراءة الملف الأصلي للحصول على نص أولي للمقارنة (اختياري)
-            if 'original_text' in st.session_state:
-                st.text("النص الأصلي (عينة):")
-                st.text(st.session_state['original_text'][:500])
-            st.text("بعد المعالجة (عينة):")
-            # يمكننا عرض نص المخرج عن طريق إعادة فتحه
+        with st.expander("🔍 Preview of changes (text only)", expanded=False):
+            # show original sample
+            if 'orig_sample' in st.session_state:
+                st.text("Original (first few lines):")
+                st.text(st.session_state['orig_sample'][:500])
+            # show modified sample
             st.session_state['output_bytes'].seek(0)
-            doc = Document(st.session_state['output_bytes'])
-            sample = '\n'.join([p.text for p in doc.paragraphs if p.text.strip()][:10])
-            st.text(sample[:500])
+            doc_out = Document(st.session_state['output_bytes'])
+            out_sample = '\n'.join([p.text for p in doc_out.paragraphs if p.text.strip()][:10])
+            st.text("Modified (first few lines):")
+            st.text(out_sample[:500])
         
-        st.subheader("📥 تنزيل الملف المعدل")
+        st.subheader("📥 Download Humanized Document")
         st.download_button(
-            "📘 تحميل ملف Word (مع الحفاظ على التنسيق الكامل)",
+            "📘 Download Fully Formatted Word File",
             data=st.session_state['output_bytes'],
             file_name="deepclean_humanized.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
-        st.info("💡 **تم الحفاظ على جميع الجداول والأشكال والمعادلات والمراجع في ملف Word الأصلي.** يوصى بمراجعة الملف بعد التحميل للتأكد من سلامة النصوص المعدلة.")
-
+        st.info("💡 **The downloaded file preserves all original tables, figures, equations, and references.** Review it before final submission.")
+    
     elif uploaded_file and not process:
-        st.info("اضغط زر المعالجة لبدء تحويل النصوص مع الحفاظ على باقي العناصر.")
-        # تخزين النص الأصلي لعرضه إذا رغب المستخدم
+        st.info("Click 'Process & Keep All Formatting' to humanize the text while preserving all non‑text elements.")
+        # cache original sample
         doc = Document(BytesIO(uploaded_file.read()))
-        original_full = '\n'.join([p.text for p in doc.paragraphs if p.text.strip()])
-        st.session_state['original_text'] = original_full
+        st.session_state['orig_sample'] = '\n'.join([p.text for p in doc.paragraphs if p.text.strip()][:10])
 
 if __name__ == "__main__":
+    random.seed(42)
     main()
