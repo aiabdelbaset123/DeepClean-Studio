@@ -1,9 +1,0 @@
-streamlit>=1.28.0
-transformers>=4.30.0
-torch>=2.0.0
-sentence-transformers>=2.2.0
-numpy>=1.24.0
-language_tool_python>=2.7.0
-docx2txt>=0.8
-pypdf>=3.0.0
-pandas>=2.0.0
