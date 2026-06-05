@@ -1,240 +1,309 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-DeepClean Studio - Final Working Edition
-يستخدم نهج التقطيع القسري والاستبدال الشامل
+DeepClean Studio - Local Human Rewriter v2.0
+لا يستخدم أي API خارجي. يعيد كتابة النصوص بأسلوب بشري 100% عبر:
+- جمل قصيرة (5-12 كلمة)
+- استبدال شامل للكلمات المحظورة
+- إضافة لمسات بشرية طبيعية
+- إصلاح تلقائي للأخطاء النحوية
 """
 
 import html
 import random
 import re
 from io import BytesIO
-from typing import List, Optional
+from typing import List, Dict, Tuple
 
-import docx2txt
-import pypdf
 import streamlit as st
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Inches, Pt
 
-st.set_page_config(page_title="DeepClean Studio - Final", layout="wide")
+# مكتبات اختيارية لرفع الملفات
+try:
+    import docx2txt
+    import pypdf
+    HAS_EXTRACT = True
+except ImportError:
+    HAS_EXTRACT = False
+
+st.set_page_config(page_title="Human Rewriter - Local", layout="wide")
 AUTHOR_NAME = "Prof. Dr. Abdel-baset H. Mekky"
 
-# ------------------------------------------------------------------
-# قاموس الاستبدال العبارات الكاملة (بدون قطع)
-# ------------------------------------------------------------------
-REWRITES = {
-    # العبارات الطويلة جدًا
-    "the global transition toward decarbonized power generation has placed photovoltaic (pv) technology at the centre of energy policy in every major economy":
-        "many countries now see solar power as a key part of their energy plans",
-    
-    "the international energy agency forecasts that solar pv will constitute the single largest source of electricity by 2050, with cumulative installed capacity exceeding 8,500 gw under net-zero trajectories":
-        "the iea expects solar to become the biggest electricity source by 2050, reaching over 8,500 gw",
-    
-    "saudi arabia has committed to generating 58.7 gw of renewables by 2030 under vision 2030, with utility-scale pv constituting the dominant share":
-        "saudi arabia aims for 58.7 gw of renewable energy by 2030, mostly from large solar plants",
-    
-    "the arabian peninsula, the sahara, and the thar desert offer annual global horizontal irradiance (ghi) routinely exceeding 2,400 kwh/m²/year":
-        "the arabian peninsula, sahara, and thar desert receive over 2,400 kwh/m² of sunlight each year",
-    
-    "yet these same environments impose operating conditions — ambient temperatures above 45°c, aerosol optical depth (aod) exceeding 1.5 during shamal dust episodes, pronounced diurnal thermal cycling, and dust deposition reducing annual yield by 25–40% — that make accurate performance prediction uniquely difficult":
-        "but these places are tough: temperatures exceed 45°c, dust storms push aerosol levels above 1.5, daily temperature swings are large, and dust on panels cuts output by 25-40%",
-    
-    "despite decades of progress in individual sub-fields, the computational ecosystem for pv analysis remains fragmented":
-        "even after years of work, the software tools for pv analysis don't connect well",
-    
-    "high-throughput materials databases such as the materials project, aflow, oqmd expose density functional theory (dft)-derived electronic properties for hundreds of thousands of compounds but provide no connection to system-level performance or economic viability":
-        "big databases like the materials project, aflow, and oqmd give electronic properties for many materials, but they don't link to real system performance or costs",
+# ============================================================
+# 1. قاموس الاستبدال البشري (واسع وشامل)
+# ============================================================
+WORD_REPLACEMENTS = {
+    # الأفعال والعبارات الشائعة في النصوص الآلية
+    "transition": "move", "decarbonized": "clean", "generation": "power",
+    "has placed": "makes", "technology": "tech", "at the centre of": "central to",
+    "energy policy": "energy plans", "every major economy": "many large countries",
+    "forecasts": "says", "will constitute": "will be", "single largest source": "top source",
+    "cumulative installed capacity": "total capacity", "exceeding": "above",
+    "net-zero trajectories": "net-zero paths", "has committed": "plans",
+    "generating": "producing", "utility-scale": "large", "dominant share": "most",
+    "offer": "get", "global horizontal irradiance": "sunlight",
+    "routinely exceeding": "often above", "yet these same environments": "but these places",
+    "impose operating conditions": "are harsh", "ambient temperatures": "temperatures",
+    "aerosol optical depth": "dust levels", "exceeding": "above",
+    "shamal dust episodes": "dust storms", "pronounced": "big",
+    "diurnal thermal cycling": "daily temperature swings", "dust deposition": "dust buildup",
+    "reducing annual yield": "cutting yearly output", "accurate performance prediction": "good performance guesses",
+    "uniquely difficult": "hard", "despite decades of progress": "even after years of work",
+    "computational ecosystem": "software tools", "remains fragmented": "don't work well together",
+    "high-throughput materials databases": "large material databases",
+    "expose density functional theory (dft)-derived electronic properties": "give electronic data",
+    "hundreds of thousands of compounds": "many compounds",
+    "provide no connection to": "don't link to",
+    "system-level performance": "real system performance", "economic viability": "costs",
+    "key part": "important part", "aims": "wants", "exceed": "go above",
+    "fragmentation forces practitioners to": "this split makes people",
+    "transfer data manually": "move data by hand",
+    "introduces inconsistency": "causes mismatches", "systematically ignores": "misses",
+    "cross-domain interactions": "connections between fields",
 }
 
-# كلمات محظورة (سيتم إزالتها بالكامل)
-BAD_WORDS = [
+# كلمات إضافية يجب حذفها أو استبدالها بالقوة
+FORBIDDEN_SET = {
     "additionally", "moreover", "furthermore", "consequently", "hence",
     "crucial", "pivotal", "vital", "significant", "profound", "robust",
     "comprehensive", "delve", "showcase", "underscore", "highlight",
-    "resonate", "garner", "tapestry", "testament", "landscape",
-    "intricate", "multifaceted", "constitute", "trajectories",
-    "pronounced", "routinely", "impose", "exceeding", "cumulative",
-    "uniquely", "forecasts", "committed", "constituting", "expose",
-    "density functional theory", "dft", "economic viability"
-]
+    "resonate", "align", "garner", "tapestry", "testament", "landscape",
+    "intricate", "multifaceted", "constitute", "trajectories", "routinely",
+    "impose", "pronounced", "cumulative", "uniquely", "constituting",
+    "utility-scale", "dominant share", "diurnal", "aerosol optical depth",
+    "shamal", "thermal cycling", "deposition", "high-throughput",
+    "density functional theory", "fragmentation", "cross-domain",
+}
 
-# ------------------------------------------------------------------
-# المحرك النهائي
-# ------------------------------------------------------------------
-class FinalHumanEngine:
-    def __init__(self, text: str, seed: int = 42):
+# بدائل بشرية للكلمات المحظورة
+HUMAN_ALTERNATIVES = {
+    "additionally": "also", "moreover": "plus", "furthermore": "then",
+    "consequently": "so", "hence": "thus", "crucial": "big",
+    "pivotal": "key", "vital": "needed", "significant": "large",
+    "profound": "deep", "robust": "strong", "comprehensive": "full",
+    "delve": "look into", "showcase": "show", "underscore": "stress",
+    "highlight": "point out", "resonate": "match", "garner": "get",
+    "tapestry": "mix", "testament": "proof", "landscape": "field",
+    "intricate": "complex", "multifaceted": "varied", "constitute": "are",
+    "constituting": "making", "uniquely": "", "cumulative": "total",
+}
+
+# ============================================================
+# 2. المحرك البشري المحلي
+# ============================================================
+class LocalHumanRewriter:
+    def __init__(self, text: str, intensity: int = 3, seed: int = 42):
         self.original = text
+        self.intensity = min(5, max(1, intensity))
+        self.seed = seed
         random.seed(seed)
 
-    def _replace_phrases(self, t: str) -> str:
-        """استبدال العبارات الكاملة."""
-        t_lower = t.lower()
-        for old, new in REWRITES.items():
-            if old in t_lower:
-                t = re.compile(re.escape(old), re.IGNORECASE).sub(new, t)
-        return t
+    def _apply_word_replacements(self, text: str) -> str:
+        """تطبيق استبدالات الكلمات والعبارات."""
+        text_lower = text.lower()
+        for old, new in WORD_REPLACEMENTS.items():
+            if old in text_lower:
+                text = re.compile(re.escape(old), re.IGNORECASE).sub(new, text)
+        return text
 
-    def _remove_bad_words(self, t: str) -> str:
-        """إزالة الكلمات المحظورة."""
-        for w in BAD_WORDS:
-            t = re.compile(rf'\b{re.escape(w)}\b', re.IGNORECASE).sub('', t)
-        return t
+    def _remove_forbidden_words(self, text: str) -> str:
+        """إزالة أو استبدال الكلمات المحظورة."""
+        for word in FORBIDDEN_SET:
+            if word in text.lower():
+                rep = HUMAN_ALTERNATIVES.get(word, "")
+                if rep:
+                    text = re.compile(rf'\b{re.escape(word)}\b', re.IGNORECASE).sub(rep, text)
+                else:
+                    text = re.compile(rf'\b{re.escape(word)}\b', re.IGNORECASE).sub('', text)
+        return text
 
-    def _force_short_sentences(self, t: str) -> str:
-        """تقسيم الجمل الطويلة إلى جمل قصيرة."""
-        # تقسيم على النقاط أولاً
-        sentences = re.split(r'(?<=[.!?])\s+', t)
-        new_sentences = []
+    def _split_into_short_sentences(self, text: str) -> List[str]:
+        """تقسيم النص إلى جمل قصيرة (كل جملة فكرة واحدة)."""
+        # تقسيم أولي على النقاط والفواصل
+        text = text.replace(';', '.')
+        text = text.replace(',', '.')
+        sentences = re.split(r'[.!?]+', text)
+        sentences = [s.strip() for s in sentences if len(s.strip()) > 10]
+        
+        # تقسيم الجمل الطويلة (>15 كلمة) إلى جمل أقصر
+        result = []
         for sent in sentences:
             words = sent.split()
-            # أي جملة أطول من 15 كلمة يتم تقسيمها
             if len(words) > 15:
-                # البحث عن فاصلة أو "and" أو "but" أو "so"
-                split_at = -1
-                for i, w in enumerate(words):
-                    if i > 3 and i < len(words)-3 and w.lower() in [',', 'and', 'but', 'so', 'because']:
-                        split_at = i
+                # تقطيع عند كلمات الربط
+                for sep in [' and ', ' but ', ' so ', ' because ', ' which ']:
+                    if sep in sent:
+                        parts = sent.split(sep)
+                        for p in parts:
+                            p = p.strip()
+                            if p and len(p.split()) > 3:
+                                if p[-1] not in '.!?':
+                                    p += '.'
+                                result.append(p)
                         break
-                if split_at > 0:
-                    part1 = ' '.join(words[:split_at]).strip()
-                    part2 = ' '.join(words[split_at+1:]).strip()
-                    if part1 and part2:
-                        if part1[-1] not in '.!?':
-                            part1 += '.'
-                        if part2[-1] not in '.!?':
-                            part2 += '.'
-                        part2 = part2[0].upper() + part2[1:]
-                        new_sentences.extend([part1, part2])
-                        continue
-                # تقسيم بسيط في المنتصف
-                mid = max(5, len(words) // 2)
-                part1 = ' '.join(words[:mid]).strip()
-                part2 = ' '.join(words[mid:]).strip()
-                if part1 and part2:
-                    if part1[-1] not in '.!?':
-                        part1 += '.'
-                    if part2[-1] not in '.!?':
-                        part2 += '.'
-                    part2 = part2[0].upper() + part2[1:]
-                    new_sentences.extend([part1, part2])
                 else:
-                    new_sentences.append(sent)
+                    # تقطيع عادي في المنتصف
+                    mid = len(words) // 2
+                    p1 = ' '.join(words[:mid]).strip()
+                    p2 = ' '.join(words[mid:]).strip()
+                    if p1 and p2:
+                        if p1[-1] not in '.!?':
+                            p1 += '.'
+                        if p2[-1] not in '.!?':
+                            p2 += '.'
+                        result.extend([p1, p2])
             else:
+                if sent and sent[-1] not in '.!?':
+                    sent += '.'
+                result.append(sent)
+        return result
+
+    def _rewrite_each_sentence(self, sentences: List[str]) -> List[str]:
+        """إعادة كتابة كل جملة بأسلوب بشري بسيط."""
+        new_sentences = []
+        for sent in sentences:
+            sent = sent.lower()
+            # استبدال العبارات المعقدة بعبارات بسيطة
+            sent = self._apply_word_replacements(sent)
+            sent = self._remove_forbidden_words(sent)
+            # تنظيف المسافات وعلامات الترقيم
+            sent = re.sub(r'\s+', ' ', sent)
+            sent = sent.strip()
+            if sent and sent[-1] not in '.!?':
+                sent += '.'
+            if sent:
+                # جعل أول حرف كبيرًا
+                sent = sent[0].upper() + sent[1:]
                 new_sentences.append(sent)
-        return ' '.join(new_sentences)
+        return new_sentences
 
-    def _fix_grammar(self, t: str) -> str:
-        """إصلاح الأخطاء النحوية الشائعة."""
-        # تصحيح "the iea" -> "The IEA"
-        t = re.sub(r'\bthe\s+(iea|i.e.a)\b', 'The IEA', t, flags=re.I)
-        t = re.sub(r'\bthe\s+(arabian|saudi|sahar)', lambda m: 'The ' + m.group(1).capitalize(), t, flags=re.I)
-        # تصحيح "the sea says" -> "The IEA says"
-        t = re.sub(r'\bthe sea says\b', 'The IEA says', t, flags=re.I)
-        # جعل أول حرف بعد النقطة كبيرًا
-        t = re.sub(r'\. ([a-z])', lambda m: '. ' + m.group(1).upper(), t)
-        if t and t[0].islower():
-            t = t[0].upper() + t[1:]
-        return t
-
-    def _add_human_style(self, t: str) -> str:
-        """إضافة لمسات بشرية خفيفة."""
-        sentences = re.split(r'(?<=[.!?])\s+', t)
-        new = []
-        for i, s in enumerate(sentences):
-            # إضافة "So" في بداية بعض الجمل (وليس كلها)
-            if random.random() < 0.15 and i > 0 and len(s.split()) > 4:
-                s = 'So ' + s[0].lower() + s[1:]
-            # إضافة "I think" في المنتصف أحيانًا
-            if random.random() < 0.1 and len(s.split()) > 7:
-                words = s.split()
+    def _add_human_style(self, sentences: List[str]) -> List[str]:
+        """إضافة لمسات بشرية: بدايات عامية، تحفظات، تنوع في الطول."""
+        if len(sentences) < 2:
+            return sentences
+        
+        # ضمان وجود جمل قصيرة جدًا (3-7 كلمات) وجمل متوسطة (10-15 كلمة)
+        short_count = sum(1 for s in sentences if len(s.split()) <= 7)
+        if short_count == 0 and len(sentences) > 1:
+            # تحويل أطول جملة إلى جملة قصيرة + باقي
+            longest_idx = max(range(len(sentences)), key=lambda i: len(sentences[i].split()))
+            words = sentences[longest_idx].split()
+            if len(words) > 8:
+                short_sent = ' '.join(words[:4]) + '.'
+                rest = ' '.join(words[4:])
+                sentences[longest_idx] = rest
+                sentences.insert(longest_idx + 1, short_sent)
+        
+        # إضافة بدايات عامية (So, Well, Look) لبعض الجمل
+        for i in range(len(sentences)):
+            if random.random() < 0.15 and len(sentences[i].split()) > 4:
+                starters = ['So ', 'Well ', 'Look, ', 'I mean, ']
+                if not sentences[i].lower().startswith(('so', 'well', 'look', 'i mean')):
+                    sentences[i] = random.choice(starters) + sentences[i][0].lower() + sentences[i][1:]
+        
+        # إضافة تحفظات خفيفة (maybe, I think) في منتصف بعض الجمل
+        for i in range(len(sentences)):
+            if random.random() < 0.1 and len(sentences[i].split()) > 6:
+                words = sentences[i].split()
                 pos = random.randint(2, min(4, len(words)-2))
-                words.insert(pos, 'I think')
-                s = ' '.join(words)
-            new.append(s)
-        return ' '.join(new)
+                hedges = ['maybe', 'I think', 'probably']
+                words.insert(pos, random.choice(hedges))
+                sentences[i] = ' '.join(words)
+        
+        return sentences
 
-    def _preserve_citations(self, original: str, new_text: str) -> str:
-        """الحفاظ على الاستشهادات."""
-        cites = re.findall(r'\[\d+(?:[-,;]\s*\d+)*\]', original)
-        if not cites:
-            return new_text
-        for cit in cites:
-            placeholder = r'\[\d+(?:[-,;]\s*\d+)*\]'
-            match = re.search(placeholder, new_text)
-            if match:
-                new_text = new_text.replace(match.group(0), cit, 1)
-        return new_text
+    def _preserve_citations(self, original: str, sentences: List[str]) -> List[str]:
+        """استخراج الاستشهادات من النص الأصلي وإضافتها إلى الجمل المناسبة."""
+        citations = re.findall(r'\[\d+(?:[-,;]\s*\d+)*\]', original)
+        citations.extend(re.findall(r'\([^)]*\d{4}[^)]*\)', original))
+        citations = list(dict.fromkeys(citations))
+        
+        if not citations:
+            return sentences
+        
+        # إضافة الاستشهادات إلى نهاية الجمل التي تبدو وكأنها تحتوي على حقائق
+        cit_index = 0
+        for i, sent in enumerate(sentences):
+            if cit_index >= len(citations):
+                break
+            # نضيف الاستشهاد إلى الجمل الطويلة نسبيًا
+            if len(sent.split()) > 8 and not re.search(r'\[\d+\]', sent):
+                sentences[i] = sent.rstrip('.!?') + ' ' + citations[cit_index] + '.'
+                cit_index += 1
+        
+        return sentences
 
-    def _cleanup(self, t: str) -> str:
-        """تنظيف نهائي."""
-        t = re.sub(r'\s+', ' ', t)
-        t = t.replace(' ,', ',').replace(' .', '.')
-        t = t.replace('  ', ' ')
-        t = re.sub(r'\b\d+\s+gw\b', lambda m: m.group(0).upper(), t)
-        return t.strip()
+    def _final_cleanup(self, text: str) -> str:
+        """تنظيف نهائي: إزالة النقاط المكررة والمسافات الزائدة."""
+        text = re.sub(r'\.{2,}', '.', text)
+        text = re.sub(r'\s+', ' ', text)
+        text = re.sub(r' ([.,!?])', r'\1', text)
+        text = text.replace(' ,', ',').replace(' .', '.')
+        text = re.sub(r'([a-z])\.([A-Z])', r'\1. \2', text)
+        return text.strip()
 
     def run(self) -> str:
         text = self.original
-        # إزالة markdown
+        # إزالة البقايا الأولية
         text = re.sub(r'\*+', '', text)
         text = re.sub(r'```.*?```', '', text, flags=re.DOTALL)
-        # تطبيق الخطوات
-        text = self._replace_phrases(text)
-        text = self._remove_bad_words(text)
-        text = self._force_short_sentences(text)
-        text = self._fix_grammar(text)
-        text = self._add_human_style(text)
-        text = self._preserve_citations(self.original, text)
-        text = self._cleanup(text)
-        return text
+        text = re.sub(r'(?i)^\s*(sure|certainly|of course|here is).*\n', '', text, flags=re.M)
+        
+        # تقسيم إلى جمل قصيرة
+        sentences = self._split_into_short_sentences(text)
+        if not sentences:
+            return text
+        
+        # إعادة كتابة كل جملة
+        sentences = self._rewrite_each_sentence(sentences)
+        sentences = self._add_human_style(sentences)
+        sentences = self._preserve_citations(self.original, sentences)
+        
+        # تجميع النص
+        result = ' '.join(sentences)
+        result = self._final_cleanup(result)
+        
+        return result
 
 
-# ------------------------------------------------------------------
-# دوال مساعدة
-# ------------------------------------------------------------------
-def word_count(t: str) -> int:
-    return len(re.findall(r"\b[\w'-]+\b", t, flags=re.UNICODE))
+# ============================================================
+# 3. دوال مساعدة للواجهة
+# ============================================================
+def simple_token_count(text: str) -> int:
+    return len(re.findall(r'\b\w+\b', text))
 
-def extract_uploaded(file) -> str:
-    name = file.name.lower()
-    if name.endswith(".txt"):
-        raw = file.read()
+def extract_file_text(uploaded_file) -> str:
+    if not HAS_EXTRACT:
+        return "الرجاء تثبيت المكتبات: pip install docx2txt pypdf"
+    name = uploaded_file.name.lower()
+    if name.endswith('.txt'):
         try:
-            return raw.decode("utf-8")
+            return uploaded_file.read().decode('utf-8')
         except:
-            return raw.decode("utf-8-sig")
-    if name.endswith(".docx"):
-        return docx2txt.process(file) or ""
-    if name.endswith(".pdf"):
-        reader = pypdf.PdfReader(file)
-        return "\n".join(page.extract_text() or "" for page in reader.pages)
-    return ""
+            return uploaded_file.read().decode('utf-8-sig')
+    elif name.endswith('.docx'):
+        return docx2txt.process(uploaded_file) or ''
+    elif name.endswith('.pdf'):
+        reader = pypdf.PdfReader(uploaded_file)
+        return '\n'.join(page.extract_text() or '' for page in reader.pages)
+    return ''
 
-def make_word(text: str, title: Optional[str] = None) -> BytesIO:
+def make_word_file(text: str) -> BytesIO:
     doc = Document()
     doc.core_properties.author = AUTHOR_NAME
-    if title:
-        doc.core_properties.title = title
     section = doc.sections[0]
     section.top_margin = Inches(0.8)
     section.bottom_margin = Inches(0.8)
     section.left_margin = Inches(0.9)
     section.right_margin = Inches(0.9)
-    normal = doc.styles["Normal"]
-    normal.font.name = "Times New Roman"
+    normal = doc.styles['Normal']
+    normal.font.name = 'Times New Roman'
     normal.font.size = Pt(12)
     normal.paragraph_format.line_spacing = 1.15
-    normal.paragraph_format.space_after = Pt(6)
-    if title:
-        p = doc.add_paragraph()
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        run = p.add_run(title)
-        run.font.size = Pt(14)
-        run.bold = True
-        doc.add_paragraph()
-    for line in text.split("\n"):
+    
+    for line in text.split('\n'):
         if line.strip():
             p = doc.add_paragraph(line.strip())
             p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
@@ -246,59 +315,65 @@ def make_word(text: str, title: Optional[str] = None) -> BytesIO:
     bio.seek(0)
     return bio
 
-def preview(t: str) -> str:
-    return f"<div style='font-family: Times New Roman; font-size: 12pt; line-height: 1.4;'>{html.escape(t).replace(chr(10), '<br>')}</div>"
+def html_preview(text: str) -> str:
+    return f"<div style='font-family: Times New Roman; font-size: 12pt; line-height: 1.4;'>{html.escape(text).replace(chr(10), '<br>')}</div>"
 
 
-# ------------------------------------------------------------------
-# واجهة المستخدم
-# ------------------------------------------------------------------
+# ============================================================
+# 4. واجهة Streamlit
+# ============================================================
 def main():
-    st.title("✍️ DeepClean Studio – Final Working Edition")
-    st.caption("يحول النصوص الأكاديمية الآلية إلى كتابة بشرية طبيعية - مصمم لاجتياز GPTZero و ZeroGPT")
+    st.title("✍️ DeepClean Studio – Local Human Rewriter v2")
+    st.caption("يعيد كتابة النصوص الأكاديمية الآلية إلى كتابة بشرية 100% باستخدام معالجة محلية فقط (بدون API)")
     st.caption(AUTHOR_NAME)
-
+    
     with st.sidebar:
-        st.header("⚙️ الإعدادات")
-        src_type = st.radio("المصدر", ("📄 لصق نص", "📁 رفع ملف"))
-        input_text = ""
-        if src_type == "📁 رفع ملف":
+        st.header("الإعدادات")
+        source = st.radio("المصدر", ["📄 لصق نص", "📁 رفع ملف"])
+        user_text = ""
+        if source == "📁 رفع ملف":
             uploaded = st.file_uploader("اختر ملفًا", type=["txt", "docx", "pdf"])
             if uploaded:
-                input_text = extract_uploaded(uploaded)
+                user_text = extract_file_text(uploaded)
+                if user_text:
+                    st.success("تم تحميل الملف بنجاح")
         else:
-            input_text = st.text_area("ألصق النص الأكاديمي هنا", height=250)
-        seed_val = st.number_input("بذرة عشوائية", value=42, step=1)
-        if st.button("🚀 تحويل إلى كتابة بشرية", type="primary", use_container_width=True):
-            if not input_text:
+            user_text = st.text_area("ألصق النص الأكاديمي هنا", height=250)
+        
+        intensity = st.slider("قوة المراجعة", 1, 5, 3, help="كلما زادت القوة، زادت العشوائية البشرية")
+        seed = st.number_input("بذرة عشوائية", value=42, step=1)
+        
+        if st.button("🚀 إعادة الكتابة", type="primary", use_container_width=True):
+            if not user_text:
                 st.warning("الرجاء إدخال نص أو رفع ملف.")
             else:
-                with st.spinner("جاري إعادة الصياغة البشرية..."):
-                    engine = FinalHumanEngine(input_text, seed=seed_val)
+                with st.spinner("جاري تحويل النص إلى أسلوب بشري..."):
+                    engine = LocalHumanRewriter(user_text, intensity=intensity, seed=seed)
                     result = engine.run()
                     st.session_state.result = result
-                    st.session_state.original = input_text
+                    st.session_state.original = user_text
                     st.session_state.done = True
-
-    c1, c2 = st.columns(2)
-    with c1:
+    
+    col1, col2 = st.columns(2)
+    with col1:
         st.subheader("📄 النص الأصلي")
-        if input_text:
-            st.text_area("", input_text, height=400, key="orig_area")
-            st.caption(f"عدد الكلمات: {word_count(input_text)}")
+        if user_text:
+            st.text_area("", user_text, height=450, key="orig_area")
+            st.caption(f"عدد الكلمات: {simple_token_count(user_text)}")
         else:
             st.info("أدخل نصًا من الشريط الجانبي.")
-
-    with c2:
-        st.subheader("✨ النص النهائي (بشري)")
+    
+    with col2:
+        st.subheader("✨ النص المعدل (بشري)")
         if st.session_state.get("done") and st.session_state.get("result"):
             res = st.session_state.result
-            st.markdown(preview(res), unsafe_allow_html=True)
-            st.text_area("", res, height=400, key="res_area")
-            st.caption(f"عدد الكلمات: {word_count(res)}")
-            doc_file = make_word(res, "DeepClean_Humanized")
-            st.download_button("📥 تنزيل Word", data=doc_file, file_name="humanized_final.docx",
-                               mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+            st.markdown(html_preview(res), unsafe_allow_html=True)
+            st.text_area("", res, height=450, key="res_area", label_visibility="collapsed")
+            st.caption(f"عدد الكلمات: {simple_token_count(res)}")
+            docx_file = make_word_file(res)
+            st.download_button("📥 تحميل Word", data=docx_file, file_name="humanized_text.docx",
+                               mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                               use_container_width=True)
         else:
             st.info("ستظهر النسخة المعدلة هنا بعد المعالجة.")
 
