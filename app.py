@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 import re
-import random
 import streamlit as st
 from io import BytesIO
 
-# مكتبات Word
 try:
     from docx import Document
     from docx.shared import Pt
@@ -13,79 +11,45 @@ try:
 except:
     DOCX_OK = False
 
-st.set_page_config(page_title="DeepClean", layout="wide")
-st.title("🧬 DeepClean Studio - النسخة النهائية")
+st.set_page_config(page_title="DeepClean - Humanize", layout="wide")
+st.title("🧬 DeepClean Studio")
+st.caption("يغير النصوص الأكاديمية إلى أسلوب بشري - يحافظ على الجداول والأشكال والمعادلات")
 
-# ==================== صندوق اللصق الرئيسي ====================
-st.subheader("📝 أدخل النص هنا (لصق مباشر)")
-user_text = st.text_area("", height=200, key="paste_area")
-
-st.markdown("---")
-st.subheader("📁 أو ارفع ملف Word (يتم الحفاظ على الجداول والأشكال)")
-uploaded_file = st.file_uploader("اختر ملف .docx", type=["docx"])
-
-# الإعدادات
-col1, col2 = st.columns(2)
-with col1:
-    intensity = st.slider("شدة المراجعة", 1, 5, 3)
-with col2:
-    st.write("")
-    st.write("")
-
-# ==================== قواعد التحويل ====================
-replacements = {
+# ========== قواعد التحويل (بدون إضافات تخريبية) ==========
+REPLACE = {
     "additionally": "also", "moreover": "also", "furthermore": "then",
     "consequently": "so", "hence": "so", "crucial": "important",
     "pivotal": "key", "vital": "needed", "significant": "large",
     "profound": "deep", "robust": "strong", "comprehensive": "full",
     "delve": "look into", "showcase": "show", "highlight": "point out",
-    "constitute": "are", "trajectories": "paths", "pronounced": "large",
+    "constitute": "are", "trajectories": "paths", "pronounced": "clear",
     "routinely": "often", "impose": "bring", "exceeding": "above",
     "cumulative": "total", "uniquely": "", "forecasts": "expects",
+    "committed": "plans", "constitutes": "is", "expose": "give",
+    "fragmented": "split", "incorporating": "using",
 }
 
-def humanize(txt, level):
-    if not txt.strip():
-        return txt
-    for old, new in replacements.items():
-        txt = re.sub(rf'\b{re.escape(old)}\b', new, txt, flags=re.I)
-    # تقطيع الجمل الطويلة
-    if level >= 3:
-        sents = re.split(r'(?<=[.!?])\s+', txt)
-        new_sents = []
-        for s in sents:
-            if len(s.split()) > 28:
-                mid = len(s.split())//2
-                a = ' '.join(s.split()[:mid])
-                b = ' '.join(s.split()[mid:])
-                if a and b:
-                    if a[-1] not in '.!?': a += '.'
-                    if b[-1] not in '.!?': b += '.'
-                    b = b[0].upper() + b[1:]
-                    new_sents.extend([a, b])
-                else:
-                    new_sents.append(s)
-            else:
-                new_sents.append(s)
-        txt = ' '.join(new_sents)
-    # لمسات بشرية
-    if level >= 2 and random.random() < 0.3:
-        txt = "So, " + txt[0].lower() + txt[1:]
-    if level >= 4 and random.random() < 0.15:
-        txt = txt.rstrip('.!?') + ', right?'
-    txt = re.sub(r'\s+', ' ', txt)
-    if txt and txt[0].islower():
-        txt = txt[0].upper() + txt[1:]
-    return txt
+def humanize(text):
+    """تطبيق الاستبدالات فقط - لا إضافات تخريبية"""
+    if not text.strip():
+        return text
+    for old, new in REPLACE.items():
+        text = re.sub(rf'\b{re.escape(old)}\b', new, text, flags=re.I)
+    # تنظيف المسافات فقط
+    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r'\s+([.,;:!?])', r'\1', text)
+    if text and text[0].islower():
+        text = text[0].upper() + text[1:]
+    return text.strip()
 
-def process_word_preserve(file_bytes, level):
-    """معالجة ملف Word مع الحفاظ على الجداول والأشكال والمعادلات"""
+def process_word(file_bytes):
+    """معالجة ملف Word مع الحفاظ على كل شيء"""
     doc = Document(file_bytes)
     modified = 0
     for para in doc.paragraphs:
         if not para.text.strip():
             continue
-        # تخطي الفقرات التي تحتوي على معادلات أو كائنات
+        # تخطي الفقرات التي قد تحتوي على معادلات
         skip = False
         for run in para.runs:
             if run.element.xpath('.//m:oMath') or run.element.xpath('.//w:object'):
@@ -93,39 +57,40 @@ def process_word_preserve(file_bytes, level):
                 break
         if skip:
             continue
-        new_text = humanize(para.text, level)
+        new_text = humanize(para.text)
         if new_text != para.text:
+            style = para.style
+            alignment = para.paragraph_format.alignment
             para.clear()
             run = para.add_run(new_text)
             run.font.name = 'Times New Roman'
             run.font.size = Pt(12)
+            para.style = style
+            if alignment:
+                para.paragraph_format.alignment = alignment
             modified += 1
     out = BytesIO()
     doc.save(out)
     out.seek(0)
     return out, modified
 
-# ==================== زر التحويل ====================
-if st.button("🔄 تحويل النص (للملصق أو للملف)", type="primary", use_container_width=True):
-    result = None
-    if uploaded_file:
-        with st.spinner("معالجة ملف Word مع الحفاظ على الجداول والأشكال..."):
-            out_bytes, count = process_word_preserve(BytesIO(uploaded_file.read()), intensity)
-            st.success(f"✅ تم تعديل {count} فقرة. جميع الجداول والأشكال والمعادلات سليمة.")
-            st.download_button("📥 تحميل ملف Word المعدل", data=out_bytes,
-                               file_name="humanized.docx",
-                               mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-    elif user_text.strip():
-        with st.spinner("جاري التحويل..."):
-            result = humanize(user_text, intensity)
-        st.subheader("📄 النص الأصلي")
-        st.text_area("", user_text, height=200)
-        st.subheader("✨ النص المعدل (بشري)")
-        st.text_area("", result, height=200)
-        if result == user_text:
-            st.warning("لم يتغير النص. جرب شدة أعلى أو نصاً أطول.")
-        else:
-            st.success(f"تم التغيير! {len(user_text)} → {len(result)} حرف")
-            st.download_button("📥 تحميل النص (TXT)", data=result.encode(), file_name="humanized.txt")
+# ========== واجهة المستخدم ==========
+st.subheader("📝 أدخل النص (لصق مباشر)")
+user_text = st.text_area("", height=200)
+
+st.subheader("📁 أو ارفع ملف Word")
+uploaded = st.file_uploader("اختر ملف .docx", type=["docx"])
+
+if st.button("🔄 تحويل", type="primary"):
+    if user_text.strip():
+        result = humanize(user_text)
+        col1, col2 = st.columns(2)
+        col1.text_area("النص الأصلي", user_text, height=300)
+        col2.text_area("النص المعدل", result, height=300)
+        st.download_button("تحميل TXT", result.encode(), "humanized.txt")
+    elif uploaded:
+        out, count = process_word(BytesIO(uploaded.read()))
+        st.success(f"تم تعديل {count} فقرة. الجداول والأشكال سليمة.")
+        st.download_button("تحميل Word", out, "humanized.docx")
     else:
-        st.warning("الرجاء إدخال نص في المربع أو رفع ملف Word.")
+        st.warning("أدخل نصاً أو ارفع ملفاً")
