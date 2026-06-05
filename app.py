@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-DeepClean Studio - إصدار يدعم ملفات Word (آمن)
-يعالج النصوص من ملفات .docx و .pdf و .txt ويعيد صياغتها بأسلوب بشري.
-لا يقوم بتعديل ملف Word مباشرة، بل يعرض النص المعدل لنسخه ولصقه يدويًا،
-للحفاظ على سلامة الجداول والأشكال والمعادلات.
+DeepClean Studio - الإصدار النهائي (معالجة آمنة لـ Word واللصق المباشر)
+يعالج النصوص الأكاديمية المستخرجة من ملفات Word أو النص المباشر،
+ويطبق قواعد إعادة الصياغة البشرية، ويعرض النص المعدل لنسخه ولصقه يدويًا.
 """
 
 import re
@@ -12,23 +11,17 @@ import streamlit as st
 from io import BytesIO
 from typing import Dict
 
-# مكتبات استخراج النص
+# مكتبات استخراج النص من Word
 try:
     import docx2txt
     DOCX_AVAILABLE = True
 except ImportError:
     DOCX_AVAILABLE = False
 
-try:
-    import pypdf
-    PDF_AVAILABLE = True
-except ImportError:
-    PDF_AVAILABLE = False
-
-st.set_page_config(page_title="DeepClean Studio - يدعم Word", layout="wide")
+st.set_page_config(page_title="DeepClean Studio - Word & Paste", layout="wide")
 
 # ============================================================
-# 1. قواعد إعادة الصياغة البشرية (مثبتة من التجارب السابقة)
+# 1. قواعد إعادة الصياغة البشرية (موثقة من التجارب السابقة)
 # ============================================================
 
 PHRASE_REPLACEMENTS = [
@@ -69,6 +62,7 @@ WORD_REPLACEMENTS = {
 }
 
 def split_long_sentences(text: str, max_words: int = 28) -> str:
+    """تقطيع الجمل الطويلة إلى جملتين، مع الحفاظ على النحو السليم."""
     sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z\d])', text)
     new_sentences = []
     for sent in sentences:
@@ -76,6 +70,7 @@ def split_long_sentences(text: str, max_words: int = 28) -> str:
         if len(words) <= max_words:
             new_sentences.append(sent)
             continue
+        # البحث عن فاصلة أو حرف عطف
         split_pos = -1
         for i, w in enumerate(words):
             if i > 6 and i < len(words)-4 and w.lower() in (',', 'and', 'but', 'so', 'because', 'while', 'whereas'):
@@ -129,7 +124,7 @@ def humanize_text(text: str, intensity: int = 3) -> str:
     return text.strip()
 
 # ============================================================
-# 2. دوال التحليل ومؤشرات الجودة
+# 2. دوال التحليل
 # ============================================================
 
 def token_count(text: str) -> int:
@@ -151,7 +146,8 @@ def estimate_perplexity(text: str) -> float:
     words = re.findall(r'\b\w+\b', text.lower())
     if len(words) < 5:
         return 50.0
-    return max(20.0, min(120.0, 100.0 - (len(set(words))/len(words)) * 80))
+    diversity = len(set(words)) / len(words)
+    return max(20.0, min(120.0, 100.0 - diversity * 80))
 
 def estimate_burstiness(text: str) -> float:
     lengths = [len(s.split()) for s in re.split(r'[.!?]+', text) if s.strip()]
@@ -213,59 +209,53 @@ def classify_score(score: float) -> str:
         return "🔴 آلي محتمل"
 
 # ============================================================
-# 3. استخراج النص من الملفات
+# 3. استخراج النص من ملف Word
 # ============================================================
 
-def extract_text_from_docx(file_bytes: BytesIO) -> str:
+def extract_text_from_word(file_bytes: BytesIO) -> str:
     if not DOCX_AVAILABLE:
-        return "الرجاء تثبيت مكتبة docx2txt: pip install docx2txt"
-    return docx2txt.process(file_bytes) or ""
-
-def extract_text_from_pdf(file_bytes: BytesIO) -> str:
-    if not PDF_AVAILABLE:
-        return "الرجاء تثبيت مكتبة pypdf: pip install pypdf"
-    reader = pypdf.PdfReader(file_bytes)
-    return "\n".join(page.extract_text() or "" for page in reader.pages)
-
-def extract_text_from_txt(file_bytes: BytesIO) -> str:
-    return file_bytes.read().decode('utf-8', errors='replace')
+        return "الرجاء تثبيت docx2txt: pip install docx2txt"
+    try:
+        text = docx2txt.process(file_bytes) or ""
+        return text
+    except Exception as e:
+        return f"خطأ في قراءة الملف: {e}"
 
 # ============================================================
 # 4. واجهة المستخدم
 # ============================================================
 
 def main():
-    st.title("📄 DeepClean Studio – يدعم Word و PDF و TXT")
-    st.caption("يعالج النصوص الأكاديمية ويحولها إلى أسلوب بشري. لا يعدل ملف Word مباشرة، بل يعرض النص المعدل للنسخ واللصق اليدوي.")
-    st.info("⚠️ للحفاظ على الجداول والأشكال والمعادلات: بعد المعالجة، قم بنسخ النص المعدل ولصقه في مستند Word الأصلي (استبدل الفقرات النصية فقط).")
+    st.title("📄 DeepClean Studio – معالجة Word واللصق المباشر")
+    st.caption("يعالج النصوص الأكاديمية المستخرجة من ملفات Word أو النص المباشر، ويحولها إلى أسلوب بشري مع تحليل كامل.")
+    st.warning("⚠️ للحفاظ على الجداول والأشكال والمعادلات في ملف Word الأصلي: انسخ النص المعدل والصقه يدويًا في المستند الأصلي (استبدل الفقرات النصية فقط).")
 
     with st.sidebar:
         st.header("⚙️ الإعدادات")
         intensity = st.slider("شدة المراجعة", 1, 5, 3,
                               help="كلما زادت الشدة، زاد تقطيع الجمل الطويلة واستبدال الكلمات")
         st.markdown("---")
-        st.header("📥 رفع ملف")
-        uploaded_file = st.file_uploader("اختر ملف Word أو PDF أو TXT", type=["docx", "pdf", "txt"])
+        st.header("📥 المصدر")
+        source = st.radio("اختر طريقة الإدخال", ["لصق النص مباشرة", "رفع ملف Word"])
         user_text = ""
-        if uploaded_file:
-            ext = uploaded_file.name.split('.')[-1].lower()
-            with st.spinner("جاري استخراج النص..."):
-                if ext == "docx":
-                    user_text = extract_text_from_docx(BytesIO(uploaded_file.read()))
-                elif ext == "pdf":
-                    user_text = extract_text_from_pdf(BytesIO(uploaded_file.read()))
+
+        if source == "لصق النص مباشرة":
+            user_text = st.text_area("ألصق النص الأكاديمي هنا (مقدمة، خاتمة، مناقشة...)", height=250)
+        else:  # رفع ملف Word
+            uploaded = st.file_uploader("اختر ملف Word (.docx)", type=["docx"])
+            if uploaded:
+                with st.spinner("جاري استخراج النص من Word..."):
+                    user_text = extract_text_from_word(BytesIO(uploaded.read()))
+                if user_text and not user_text.startswith("خطأ"):
+                    st.success(f"تم استخراج {len(user_text)} حرف")
+                elif user_text.startswith("خطأ"):
+                    st.error(user_text)
                 else:
-                    user_text = extract_text_from_txt(BytesIO(uploaded_file.read()))
-            if user_text:
-                st.success(f"تم استخراج {len(user_text)} حرف")
-            else:
-                st.error("لم يتم استخراج نص من الملف")
-        else:
-            st.info("يرجى رفع ملف")
+                    st.warning("لم يتم استخراج نص من الملف")
 
         process = st.button("🚀 بدء المراجعة والتحليل", type="primary", use_container_width=True)
 
-    if process and user_text:
+    if process and user_text and not user_text.startswith("خطأ"):
         with st.spinner("جاري المعالجة..."):
             orig_analysis = analyze_text(user_text)
             orig_score = ai_score(orig_analysis)
@@ -280,8 +270,8 @@ def main():
             st.metric("عدد الكلمات", orig_analysis["words"])
             st.metric("متوسط طول الجملة", f"{orig_analysis['avg_sentence_len']:.1f}")
             st.metric("التنوع المعجمي", f"{orig_analysis['lexical_diversity']:.3f}")
-            st.metric("التشوش", f"{orig_analysis['perplexity']:.1f}")
-            st.metric("الاندفاع", f"{orig_analysis['burstiness']:.3f}")
+            st.metric("التشوش (perplexity)", f"{orig_analysis['perplexity']:.1f}")
+            st.metric("الاندفاع (burstiness)", f"{orig_analysis['burstiness']:.3f}")
             st.metric("كلمات محظورة", orig_analysis["forbidden"])
             st.metric("درجة الآلية", f"{orig_score:.2f}")
             st.write(f"**التصنيف:** {classify_score(orig_score)}")
@@ -297,25 +287,32 @@ def main():
             st.metric("درجة الآلية", f"{rev_score:.2f}")
             st.write(f"**التصنيف:** {classify_score(rev_score)}")
 
-        # عرض النصوص
+        # عرض النصوص المعدلة
         tab1, tab2 = st.tabs(["📝 النص الأصلي", "✨ النص المعدل (انسخه هنا)"])
         with tab1:
             st.text_area("", user_text, height=400, key="orig_text")
         with tab2:
             st.text_area("", revised, height=400, key="rev_text")
-            st.download_button("📥 تحميل النص المعدل كـ TXT", data=revised.encode('utf-8'),
-                               file_name="deepclean_humanized.txt", mime="text/plain")
-            st.markdown("""
-            **📌 خطوات الاستخدام الآمن في Word:**
-            1. افتح ملف Word الأصلي.
-            2. حدد الفقرات النصية التي تريد استبدالها (مثل المقدمة).
-            3. انسخ النص المعدل من الأعلى.
-            4. الصق النص في Word (استخدم "لصق مع الاحتفاظ بالنص فقط").
-            5. تأكد من بقاء الجداول والأشكال والمعادلات كما هي.
-            """)
+            col_a, col_b = st.columns(2)
+            with col_a:
+                st.download_button("📥 تحميل النص المعدل (TXT)", data=revised.encode('utf-8'),
+                                   file_name="deepclean_humanized.txt", mime="text/plain")
+            with col_b:
+                st.button("📋 نسخ إلى الحافظة (يدويًا)", disabled=True,
+                          help="حدد النص أعلاه واضغط Ctrl+C")
+            st.info("💡 **كيفية الاستخدام الآمن في Word:**\n"
+                    "1. افتح ملف Word الأصلي.\n"
+                    "2. حدد الفقرات النصية التي تريد استبدالها (مثل المقدمة).\n"
+                    "3. انسخ النص المعدل من المربع أعلاه.\n"
+                    "4. الصق النص في Word (استخدم 'لصق مع الاحتفاظ بالنص فقط').\n"
+                    "5. تأكد من بقاء الجداول والأشكال والمعادلات كما هي.\n\n"
+                    "✅ هذه الطريقة تضمن عدم تلف المستند الأصلي.")
 
     elif process:
-        st.warning("الرجاء رفع ملف أولاً.")
+        if not user_text:
+            st.warning("الرجاء إدخال نص أو رفع ملف Word.")
+        elif user_text.startswith("خطأ"):
+            st.error(user_text)
 
 if __name__ == "__main__":
     main()
