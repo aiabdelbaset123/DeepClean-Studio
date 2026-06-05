@@ -222,7 +222,7 @@ def html_preview(txt: str) -> str:
 # 4. واجهة Streamlit
 # ============================================================
 def main():
-    st.title("📄 DeepClean Studio – الإصدار النهائي المستقر")
+    st.title("📄 DeepClean Studio")
     st.caption("مراجعة النصوص الأكاديمية إلى أسلوب بشري طبيعي - يعمل محليًا، يجتاز ZeroGPT")
     st.caption(AUTHOR_NAME)
     
