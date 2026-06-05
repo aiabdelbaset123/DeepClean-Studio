@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-DeepClean Studio - النهائي المستقر
+DeepClean Studio - 
 مراجعة النصوص الأكاديمية إلى أسلوب بشري طبيعي مع الحفاظ على الاستشهادات والمصطلحات.
 يجتاز ZeroGPT بنسبة نجاح عالية. يعمل محليًا بدون API.
 """
@@ -25,7 +25,7 @@ try:
 except ImportError:
     HAS_EXTRACT = False
 
-st.set_page_config(page_title="DeepClean Studio - النهائي", layout="wide")
+st.set_page_config(page_title="DeepClean Studio", layout="wide")
 AUTHOR_NAME = "Prof. Dr. Abdel-baset H. Mekky"
 
 # ============================================================
