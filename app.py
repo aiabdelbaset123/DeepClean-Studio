@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-DeepClean Studio - Final Humanized Edition
+DeepClean Studio - Final Humanized Edition (Fixed)
 Aggressive stochastic engine to bypass all AI detectors (GPTZero, ZeroGPT, Originality.ai)
 """
 
@@ -290,15 +290,16 @@ class AggressiveHumanEngine:
         return revised
 
     def _fix_grammar_artifacts(self, text: str) -> str:
-        """Clean up double punctuation, spacing, and em dashes."""
+        """Clean up double punctuation, spacing, and em dashes. Fixed regex group error."""
         text = text.replace('—', ', ').replace('–', '-')
         text = re.sub(r'\s+\.', '.', text)
         text = re.sub(r'\.\s*\.', '.', text)
         text = re.sub(r'\s+,', ',', text)
         text = re.sub(r'([.!?])\s+([a-z])', lambda m: f'{m.group(1)} {m.group(2).upper()}', text)
         text = re.sub(r'([.!?])\1+', r'\1', text)
-        # Fix common broken patterns like "above, depth" -> "above, and depth"
-        text = re.sub(r'(\w+), (\w+) (?:exceeding|above|below)', r'\1, and \2 \3', text)
+        # Fix common broken patterns like "above, depth" -> "above, and depth" - corrected groups
+        # The pattern has two capturing groups: (\w+), (\w+). Use \1 and \2 only.
+        text = re.sub(r'(\w+), (\w+) (?:exceeding|above|below)', r'\1, and \2', text)
         return text.strip()
 
     def run(self) -> str:
@@ -453,7 +454,7 @@ def render_academic_preview(text: str) -> str:
 # 5. Streamlit UI
 # ----------------------------------------------------------------------
 def main():
-    st.title("DeepClean Studio – Final Humanized Edition")
+    st.title("DeepClean Studio – Final Humanized Edition (Fixed)")
     st.caption("محرر عشوائي عدواني يحاكي الأخطاء البشرية – يجتاز GPTZero و ZeroGPT و Originality.ai")
     st.caption(AUTHOR_NAME)
 
