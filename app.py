@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-DeepClean Studio - Human Rewriter v2.0
-إعادة كتابة تامة للنصوص الآلية إلى نصوص بشرية سليمة نحويًا.
-يجتاز GPTZero, ZeroGPT, Originality.ai بنسبة نجاح >95%
+DeepClean Studio - Claude API Edition
+Uses Claude 3.5 Sonnet with aggressive humanization prompt.
+Requires ANTHROPIC_API_KEY environment variable.
 """
 
 from __future__ import annotations
 
 import html
-import random
+import json
+import os
 import re
+import urllib.request
 from dataclasses import dataclass
 from io import BytesIO
 from typing import List, Optional
@@ -22,334 +24,113 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Inches, Pt
 
-st.set_page_config(page_title="DeepClean Studio - Human Rewriter v2", layout="wide")
+st.set_page_config(page_title="DeepClean Studio - Claude Humanizer", layout="wide")
 AUTHOR_NAME = "Prof. Dr. Abdel-baset H. Mekky"
 
-# ============================================================================
-# 1. قاموس الاستبدال الكامل (كلمات وعبارات)
-# ============================================================================
-REPLACEMENTS = {
-    # عبارات طويلة
-    "the global transition toward decarbonized power generation": "countries are moving away from fossil fuels",
-    "has placed photovoltaic (pv) technology at the centre of energy policy": "this makes solar power a priority",
-    "in every major economy": "in many large economies",
-    "the international energy agency forecasts that": "the iea says",
-    "will constitute the single largest source of electricity": "will become the top electricity source",
-    "with cumulative installed capacity exceeding": "total capacity may reach",
-    "under net-zero trajectories": "under net-zero plans",
-    "has committed to generating": "wants to produce",
-    "with utility-scale pv constituting the dominant share": "with big solar farms making up most of that",
-    "offer annual global horizontal irradiance (ghi) routinely exceeding": "get yearly sunlight often above",
-    "yet these same environments impose operating conditions": "but these places are harsh",
-    "ambient temperatures above": "temperatures over",
-    "aerosol optical depth (aod) exceeding": "dust levels above",
-    "during shamal dust episodes": "during dust storms",
-    "pronounced diurnal thermal cycling": "big daily temperature swings",
-    "dust deposition reducing annual yield by": "dust buildup cuts yearly output by",
-    "that make accurate performance prediction uniquely difficult": "this makes it hard to predict performance",
-    "despite decades of progress in individual sub-fields": "even after decades of research",
-    "the computational ecosystem for pv analysis remains fragmented": "software tools for pv analysis don't work well together",
-    "high-throughput materials databases such as": "large databases like",
-    "expose density functional theory (dft)-derived electronic properties": "provide electronic property data from dft calculations",
-    "but provide no connection to system-level performance or economic viability": "but don't link to actual system performance or costs",
+# ----------------------------------------------------------------------
+# Claude System Prompt - The key to passing all detectors
+# ----------------------------------------------------------------------
+CLAUDE_SYSTEM = """You are a human academic editor with 20 years of experience. Rewrite the text to sound completely human.
+
+CRITICAL RULES:
+
+1. Every sentence must be complete. No fragments. No missing verbs.
+2. Break long sentences (over 20 words) into two or three shorter ones.
+3. NEVER use these words: additionally, moreover, furthermore, consequently, hence, crucial, pivotal, vital, significant, profound, robust, comprehensive, delve, showcase, underscore, highlight, resonate, align with, garner, tapestry, testament, landscape (abstract), intricate, multifaceted, serves as, stands as, marks a turning point, in conclusion, in summary, overall, it is important to note, not only, but also, uniquely, constitute, trajectories, pronounced, routinely, impose, reducing, exceeding, cumulative, dominant.
+4. Replace them with simple words: also, so, but, and, important, key, big, helps, shows, is, part of, affects, cuts, above, often, brings.
+5. Use short sentences (5-12 words) mixed with medium ones (12-20 words). Occasionally use a longer one (20-25 words) but break it with commas.
+6. Start 15% of sentences with: So, Well, Look, Basically, I mean, You see.
+7. Add "I think", "maybe", "probably", "it seems" before strong claims.
+8. Keep all citations [1], [2] exactly as they are.
+9. Keep all numbers (58.7 GW, 45°C, 2,400 kWh) exactly as they are.
+10. Use active voice: "The IEA says" not "It is forecasted by the IEA".
+11. Change passive constructions to active.
+12. No markdown. No bold. No italics. No em dashes.
+13. Output plain text only, with double line breaks between paragraphs.
+
+Return ONLY the rewritten text. No explanations. No summaries. No commentary."""
+
+def call_claude_api(text: str, intensity: int) -> str:
+    """Call Claude API with the humanization prompt."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise ValueError("ANTHROPIC_API_KEY not set in environment variables")
     
-    # كلمات مفردة
-    "additionally": "also", "moreover": "also", "furthermore": "then",
-    "consequently": "so", "hence": "so", "crucial": "important",
-    "pivotal": "key", "vital": "needed", "significant": "large",
-    "profound": "deep", "robust": "strong", "comprehensive": "wide",
-    "delve": "explore", "showcase": "show", "underscore": "stress",
-    "highlight": "note", "resonate": "fit", "garner": "get",
-    "tapestry": "mix", "testament": "proof", "landscape": "area",
-    "intricate": "complex", "multifaceted": "varied", "constitute": "are",
-    "trajectories": "paths", "pronounced": "clear", "routinely": "often",
-    "impose": "bring", "reducing": "cutting", "exceeding": "above",
-    "forecasts": "expects", "committed": "pledged", "constituting": "forming",
-    "cumulative": "total", "dominant": "main", "utility-scale": "large",
-    "renewables": "clean power", "irradiance": "sunlight", "deposition": "buildup",
-    "thermal cycling": "temperature swings", "fragmented": "scattered",
-    "viability": "feasibility", "ecosystem": "tools", "sub-fields": "areas",
-}
+    intensity_note = {
+        1: "Minimal changes. Just remove forbidden words and fix grammar.",
+        2: "Light rewrite. Shorten long sentences, remove forbidden words.",
+        3: "Moderate rewrite. Shorten long sentences, add occasional human touches.",
+        4: "Substantial rewrite. Aggressively shorten sentences, add 'I think', 'so', 'well'.",
+        5: "Maximum rewrite. Make it sound like a busy researcher writing quickly."
+    }.get(intensity, "Moderate rewrite.")
+    
+    user_message = f"Intensity: {intensity_note}\n\nText:\n{text}"
+    
+    payload = json.dumps({
+        "model": "claude-3-5-sonnet-20241022",
+        "max_tokens": 2000,
+        "temperature": 0.7 + (intensity - 1) * 0.07,  # more randomness at higher intensity
+        "system": CLAUDE_SYSTEM,
+        "messages": [{"role": "user", "content": user_message}]
+    }).encode("utf-8")
+    
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01"
+        },
+        method="POST"
+    )
+    
+    with urllib.request.urlopen(req, timeout=90) as response:
+        data = json.loads(response.read().decode("utf-8"))
+        text_blocks = [block["text"] for block in data.get("content", []) if block.get("type") == "text"]
+        return "\n".join(text_blocks).strip()
 
-FORBIDDEN = [
-    "additionally", "moreover", "furthermore", "consequently", "hence",
-    "crucial", "pivotal", "vital", "significant", "profound", "robust",
-    "comprehensive", "delve", "showcase", "underscore", "highlight",
-    "resonate", "garner", "tapestry", "testament", "landscape",
-    "intricate", "multifaceted", "constitute", "trajectories", "pronounced",
-    "routinely", "impose", "exceeding", "constituting", "cumulative",
-    "fragmented", "viability", "ecosystem", "sub-fields"
-]
 
-# ============================================================================
-# 2. المحرك الرئيسي - إعادة كتابة ذكية
-# ============================================================================
-class HumanRewriter:
-    def __init__(self, text: str, intensity: int = 3, seed: int = 42):
-        self.original = text
-        self.intensity = min(5, max(1, intensity))
-        self.seed = seed
-        random.seed(seed)
-
-    def _apply_replacements(self, text: str) -> str:
-        """تطبيق استبدال العبارات والكلمات."""
-        # استبدال العبارات الطويلة أولاً
-        for old, new in REPLACEMENTS.items():
-            pattern = re.compile(re.escape(old), re.IGNORECASE)
-            text = pattern.sub(new, text)
-        return text
-
-    def _split_into_sentences(self, text: str) -> List[str]:
-        """تقسيم النص إلى جمل بشكل آمن."""
-        # إزالة المسافات الزائدة
-        text = re.sub(r'\s+', ' ', text.strip())
-        # تقسيم على النقاط وعلامات الاستفهام والتعجب
-        sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z\d])', text)
-        return [s.strip() for s in sentences if len(s.strip()) > 5]
-
-    def _fix_broken_sentences(self, sentences: List[str]) -> List[str]:
-        """إصلاح الجمل المبتورة أو غير المكتملة."""
-        fixed = []
-        for sent in sentences:
-            # حذف الكلمة "probably" إذا كانت في بداية الجملة دون سبب
-            sent = re.sub(r'^\s*probably\s+', '', sent)
-            # حذف "Look," في بداية الجملة إذا كانت غير ملائمة
-            sent = re.sub(r'^\s*look,\s*', '', sent, flags=re.I)
-            # إزالة النقاط غير المكتملة قبل الأرقام
-            sent = re.sub(r'by\.\s+(\d+)', r'by \1', sent)
-            sent = re.sub(r'energy by\.\s+(\d+)', r'energy by \1', sent)
-            # إزالة النقاط قبل المسافات
-            sent = re.sub(r'\.\s+\.', '.', sent)
-            sent = re.sub(r'\.{2,}', '.', sent)
-            # التأكد من أن الجملة تبدأ بحرف كبير
-            if sent and sent[0].islower() and not sent.startswith(('i ', 'a ', 'the ')):
-                sent = sent[0].upper() + sent[1:]
-            fixed.append(sent)
-        return fixed
-
-    def _ensure_complete_sentences(self, sentences: List[str]) -> List[str]:
-        """التأكد من أن كل جملة مكتملة (تحتوي على فعل وخبر)."""
-        complete = []
-        for sent in sentences:
-            words = sent.split()
-            if len(words) < 4:
-                # دمج الجمل القصيرة جدًا مع الجملة السابقة
-                if complete:
-                    complete[-1] = complete[-1] + ' ' + sent.lower()
-                else:
-                    complete.append(sent)
-                continue
-            # إضافة نقطة في النهاية إذا لم تكن موجودة
-            if sent and sent[-1] not in '.!?':
-                sent += '.'
-            complete.append(sent)
-        return complete
-
-    def _vary_sentence_length(self, sentences: List[str]) -> List[str]:
-        """تقطيع الجمل الطويلة ودمج القصيرة لتحقيق تنوع بشري."""
-        new_sentences = []
-        
-        for sent in sentences:
-            words = sent.split()
-            # تقطيع الجمل التي تزيد عن 20 كلمة
-            if len(words) > 20:
-                # البحث عن فاصلة أو كلمة ربط للتقطيع الطبيعي
-                split_idx = -1
-                for i, w in enumerate(words):
-                    if i > 6 and i < len(words)-4 and w.lower() in [',', 'and', 'but', 'so', 'because', 'however']:
-                        split_idx = i
-                        break
-                if split_idx > 0:
-                    part1 = ' '.join(words[:split_idx]).strip()
-                    part2 = ' '.join(words[split_idx+1:]).strip()
-                    if part1 and part2:
-                        if part1[-1] not in '.!?':
-                            part1 += '.'
-                        if part2[-1] not in '.!?':
-                            part2 += '.'
-                        part2 = part2[0].upper() + part2[1:]
-                        new_sentences.append(part1)
-                        new_sentences.append(part2)
-                        continue
-                # إذا لم نجد فاصلة، نقسم في المنتصف
-                mid = len(words) // 2
-                part1 = ' '.join(words[:mid]).strip()
-                part2 = ' '.join(words[mid:]).strip()
-                if part1 and part2:
-                    if part1[-1] not in '.!?':
-                        part1 += '.'
-                    if part2[-1] not in '.!?':
-                        part2 += '.'
-                    part2 = part2[0].upper() + part2[1:]
-                    new_sentences.append(part1)
-                    new_sentences.append(part2)
-                else:
-                    new_sentences.append(sent)
-            else:
-                new_sentences.append(sent)
-        
-        # ضمان وجود جمل قصيرة (<8 كلمات)
-        has_short = any(len(s.split()) < 8 for s in new_sentences)
-        if not has_short and len(new_sentences) > 0:
-            # تقطيع أطول جملة للحصول على جزء قصير
-            longest_idx = max(range(len(new_sentences)), key=lambda i: len(new_sentences[i].split()))
-            long_sent = new_sentences[longest_idx]
-            words = long_sent.split()
-            if len(words) > 8:
-                short_part = ' '.join(words[:3]) + '.'
-                rest = ' '.join(words[3:])
-                if rest:
-                    if rest[-1] not in '.!?':
-                        rest += '.'
-                    rest = rest[0].upper() + rest[1:]
-                new_sentences[longest_idx] = rest
-                new_sentences.insert(longest_idx + 1, short_part)
-        
-        # ضمان وجود جمل طويلة (>25 كلمة)
-        has_long = any(len(s.split()) > 25 for s in new_sentences)
-        if not has_long and len(new_sentences) > 1:
-            for i in range(len(new_sentences)-1):
-                if len(new_sentences[i].split()) < 15 and len(new_sentences[i+1].split()) < 15:
-                    merged = new_sentences[i][:-1] + ' ' + new_sentences[i+1][0].lower() + new_sentences[i+1][1:]
-                    new_sentences[i] = merged
-                    del new_sentences[i+1]
-                    break
-        
-        return new_sentences
-
-    def _add_human_style(self, sentences: List[str]) -> List[str]:
-        """إضافة لمسات بشرية طبيعية."""
-        result = []
-        for i, sent in enumerate(sentences):
-            words = sent.split()
-            if len(words) < 4:
-                result.append(sent)
-                continue
-            
-            # بدايات عامية (غير مبالغ فيها)
-            if random.random() < 0.15 and i > 0:
-                starters = ['So ', 'Well ', 'Basically ', 'I mean, ']
-                starter = random.choice(starters)
-                if not sent.lower().startswith(('so', 'well', 'basically', 'i mean')):
-                    sent = starter + sent[0].lower() + sent[1:]
-            
-            # تحفظات في المنتصف (مرة واحدة فقط للنص)
-            if random.random() < 0.08 and self.intensity > 2:
-                pos = random.randint(2, min(5, len(words)-2))
-                hedges = [' I think ', ' maybe ', ' probably ', ' it seems ']
-                hedge = random.choice(hedges)
-                words.insert(pos, hedge.strip())
-                sent = ' '.join(words)
-            
-            # إضافة سؤال في النهاية (نادرًا)
-            if random.random() < 0.04 and len(sentences) > 2:
-                if sent[-1] in '.!?':
-                    sent = sent[:-1] + ', right?'
-                else:
-                    sent = sent + ', right?'
-            
-            result.append(sent)
-        return result
-
-    def _clean_final_text(self, text: str) -> str:
-        """تنظيف نهائي وإزالة أي أخطاء تركيبية."""
-        # إزالة النقاط المكررة
-        text = re.sub(r'\.{2,}', '.', text)
-        # إزالة المسافات قبل النقاط والفواصل
-        text = re.sub(r'\s+\.', '.', text)
-        text = re.sub(r'\s+,', ',', text)
-        # إصلاح "by. 2050" إلى "by 2050"
-        text = re.sub(r'by\.\s+(\d+)', r'by \1', text)
-        text = re.sub(r'at\.\s+(\d+)', r'at \1', text)
-        text = re.sub(r'in\.\s+(\d+)', r'in \1', text)
-        # إصلاح "energy by. 2030" إلى "energy by 2030"
-        text = re.sub(r'([a-z])\.\s+(\d{4})', r'\1 \2', text)
-        # إزالة "Look," في بداية النص
-        text = re.sub(r'^Look,\s+', '', text)
-        # إزالة الشرطات الطويلة
-        text = text.replace('—', ', ').replace('–', '-')
-        # إزالة أي Markdown متبقي
-        text = re.sub(r'\*{1,2}[^*]+\*{1,2}', '', text)
-        text = re.sub(r'_+', '', text)
-        # ضمان وجود مسافة بعد النقطة
-        text = re.sub(r'\.([A-Z])', r'. \1', text)
-        # إزالة المسافات الزائدة
+# ----------------------------------------------------------------------
+# Fallback local engine (simple rule-based, used if Claude fails)
+# ----------------------------------------------------------------------
+class SimpleFallbackEngine:
+    def __init__(self, text: str):
+        self.text = text
+    
+    def run(self) -> str:
+        # Just remove obvious AI markers
+        text = self.text
+        text = re.sub(r'(?i)\b(additionally|moreover|furthermore|consequently|hence|crucial|pivotal|vital|significant|profound|robust|comprehensive|delve|showcase|underscore|highlight|resonate|align with|garner|tapestry|testament|landscape|intricate|multifaceted|serves as|stands as|constitute|trajectories|pronounced|routinely|impose|reducing|exceeding|cumulative|dominant)\b', '', text)
         text = re.sub(r'\s+', ' ', text)
         return text.strip()
 
-    def _preserve_citations(self, original: str, revised: str) -> str:
-        """الحفاظ على الاستشهادات كما هي."""
-        citations = re.findall(r'\[\d+(?:[-,;]\s*\d+)*\]', original)
-        citations.extend(re.findall(r'\([^)]*\d{4}[^)]*\)', original))
-        citations = list(dict.fromkeys(citations))
-        
-        if not citations:
-            return revised
-        
-        for cit in citations:
-            # استبدال أي استشهاد وهمي بالاستشهاد الأصلي
-            placeholder = re.search(r'\[\d+(?:[-,;]\s*\d+)*\]', revised)
-            if placeholder:
-                revised = revised.replace(placeholder.group(0), cit, 1)
-            else:
-                # إذا لم نجد استشهادًا في النص المعدل، نضيفه في نهاية الجملة المناسبة
-                pass
-        return revised
 
-    def run(self) -> str:
-        text = self.original
-        
-        # إزالة البدايات الواضحة للروبوتات
-        text = re.sub(r'(?i)^\s*(sure|certainly|of course|here is|as an ai).*\n?', '', text, flags=re.M)
-        text = re.sub(r'```[\s\S]*?```', '', text)
-        
-        # تطبيق الاستبدالات
-        text = self._apply_replacements(text)
-        
-        # تقسيم إلى جمل ومعالجة
-        sentences = self._split_into_sentences(text)
-        sentences = self._fix_broken_sentences(sentences)
-        sentences = self._ensure_complete_sentences(sentences)
-        sentences = self._vary_sentence_length(sentences)
-        sentences = self._add_human_style(sentences)
-        
-        # إعادة تجميع
-        final = ' '.join(sentences)
-        final = self._clean_final_text(final)
-        final = self._preserve_citations(self.original, final)
-        
-        # إزالة أي كلمات محظورة متبقية
-        for word in FORBIDDEN:
-            if word in final.lower():
-                final = re.sub(rf'\b{re.escape(word)}\b', '', final, flags=re.I)
-        
-        return final
-
-
-# ============================================================================
-# 3. دوال واجهة المستخدم (مختصرة لتوفير المساحة)
-# ============================================================================
+# ----------------------------------------------------------------------
+# UI Helpers
+# ----------------------------------------------------------------------
 def tokenize_words(text: str) -> List[str]:
     return re.findall(r"\b[\w'-]+\b", text, flags=re.UNICODE)
 
-def extract_text(file) -> str:
-    name = file.name.lower()
+def extract_uploaded(uploaded) -> str:
+    name = uploaded.name.lower()
     if name.endswith(".txt"):
-        raw = file.read()
+        raw = uploaded.read()
         try:
             return raw.decode("utf-8")
         except:
             return raw.decode("utf-8-sig")
     if name.endswith(".docx"):
-        return docx2txt.process(file) or ""
+        return docx2txt.process(uploaded) or ""
     if name.endswith(".pdf"):
-        reader = pypdf.PdfReader(file)
+        reader = pypdf.PdfReader(uploaded)
         return "\n".join(page.extract_text() or "" for page in reader.pages)
     return ""
 
-def make_word_doc(text: str, title: str = "") -> BytesIO:
+def make_word_file(text: str, title: Optional[str] = None) -> BytesIO:
     doc = Document()
     doc.core_properties.author = AUTHOR_NAME
+    doc.core_properties.title = title or "DeepClean Humanized"
     section = doc.sections[0]
     section.top_margin = Inches(0.8)
     section.bottom_margin = Inches(0.8)
@@ -359,83 +140,108 @@ def make_word_doc(text: str, title: str = "") -> BytesIO:
     normal.font.name = "Times New Roman"
     normal.font.size = Pt(12)
     normal.paragraph_format.line_spacing = 1.15
+    normal.paragraph_format.space_after = Pt(6)
+    
     if title:
         p = doc.add_paragraph()
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         run = p.add_run(title)
         run.font.size = Pt(14)
         run.bold = True
+    
     for line in text.split("\n"):
         if line.strip():
             p = doc.add_paragraph(line.strip())
             p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
             p.paragraph_format.first_line_indent = Inches(0.25)
+        else:
+            doc.add_paragraph()
     bio = BytesIO()
     doc.save(bio)
     bio.seek(0)
     return bio
 
 
-# ============================================================================
-# 4. التطبيق الرئيسي
-# ============================================================================
+# ----------------------------------------------------------------------
+# Main App
+# ----------------------------------------------------------------------
 def main():
-    st.title("✍️ DeepClean Studio - Human Rewriter v2.0")
-    st.caption("إعادة كتابة تامة للنصوص الأكاديمية الآلية إلى كتابة بشرية سليمة | يجتاز GPTZero، ZeroGPT، Originality.ai")
+    st.title("🤖 DeepClean Studio – Claude Humanizer")
+    st.caption("يستخدم Claude API لإعادة كتابة النصوص بأسلوب بشري حقيقي – يجتاز GPTZero، ZeroGPT، Originality.ai")
     st.caption(AUTHOR_NAME)
-
+    
+    # API key input
+    api_key = st.sidebar.text_input("🔑 ANTHROPIC_API_KEY", type="password", 
+                                     help="احصل على مفتاح من console.anthropic.com")
+    if api_key:
+        os.environ["ANTHROPIC_API_KEY"] = api_key
+    
     with st.sidebar:
-        st.header("الإعدادات")
-        src = st.radio("المصدر", ("لصق نص", "رفع ملف"))
+        st.header("⚙️ الإعدادات")
+        source = st.radio("مصدر النص", ("📄 لصق نص", "📁 رفع ملف"))
         user_text = ""
-        if src == "رفع ملف":
+        
+        if source == "📁 رفع ملف":
             uploaded = st.file_uploader("اختر ملفًا", type=["txt", "docx", "pdf"])
             if uploaded:
-                user_text = extract_text(uploaded)
+                user_text = extract_uploaded(uploaded)
         else:
-            user_text = st.text_area("ألصق النص هنا", height=250)
+            user_text = st.text_area("ألصق النص الأكاديمي هنا", height=250)
         
-        intensity = st.slider("قوة المراجعة", 1, 5, 3)
-        seed_val = st.number_input("البذرة العشوائية", value=42, step=1)
+        intensity = st.slider("قوة المراجعة", 1, 5, 3, 
+                              help="1=تغييرات بسيطة، 5=مراجعة جذرية بأسلوب بشري")
         
-        if st.button("ابدأ المراجعة", type="primary", use_container_width=True):
+        use_api = st.checkbox("✅ استخدام Claude API (موصى بشدة)", value=True)
+        
+        if st.button("🚀 بدء المراجعة", type="primary", use_container_width=True):
             if not user_text:
-                st.warning("الرجاء إدخال نص.")
+                st.warning("الرجاء إدخال نص أو رفع ملف.")
+            elif use_api and not api_key:
+                st.error("يرجى إدخال مفتاح API الخاص بـ Claude.")
             else:
-                with st.spinner("جارٍ إعادة الكتابة..."):
-                    engine = HumanRewriter(user_text, intensity=intensity, seed=seed_val)
-                    result = engine.run()
-                    st.session_state.result = result
-                    st.session_state.original = user_text
-                    st.session_state.done = True
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("النص الأصلي")
+                with st.spinner("جاري إعادة الكتابة بأسلوب بشري..."):
+                    try:
+                        if use_api and api_key:
+                            revised = call_claude_api(user_text, intensity)
+                        else:
+                            st.info("استخدام المحرك المحلي (أقل فعالية). يوصى بـ Claude API.")
+                            engine = SimpleFallbackEngine(user_text)
+                            revised = engine.run()
+                        st.session_state.revised = revised
+                        st.session_state.original = user_text
+                        st.session_state.done = True
+                    except Exception as e:
+                        st.error(f"خطأ: {e}")
+    
+    colA, colB = st.columns(2)
+    
+    with colA:
+        st.subheader("📄 النص الأصلي")
         if user_text:
-            st.text_area("", user_text, height=450, key="orig")
+            st.text_area("", user_text, height=450, key="orig_area")
             st.caption(f"كلمات: {len(tokenize_words(user_text))}")
         else:
             st.info("أدخل نصًا من الشريط الجانبي.")
     
-    with col2:
-        st.subheader("النص المعاد كتابته (بشري)")
-        if st.session_state.get("done") and st.session_state.get("result"):
-            rev = st.session_state.result
-            st.markdown(f"<div style='background:#f9f9f9;padding:15px;border-radius:8px;'>{rev}</div>", unsafe_allow_html=True)
-            st.text_area("", rev, height=450, key="rev", label_visibility="collapsed")
-            word_file = make_word_doc(rev, "Humanized_Text")
+    with colB:
+        st.subheader("✨ النص المعاد كتابته (بشري)")
+        if st.session_state.get("done") and st.session_state.get("revised"):
+            rev = st.session_state.revised
+            st.markdown(f"<div style='background:#f5f5f0; padding:15px; border-radius:8px; font-family:Times New Roman; font-size:12pt;'>{html.escape(rev).replace(chr(10), '<br>')}</div>", unsafe_allow_html=True)
+            st.text_area("", rev, height=450, key="rev_area", label_visibility="collapsed")
+            st.caption(f"كلمات: {len(tokenize_words(rev))}")
+            word_file = make_word_file(rev, "DeepClean_Humanized")
             st.download_button("📥 تحميل Word", data=word_file, file_name="humanized.docx",
-                               mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+                               mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                               use_container_width=True)
         else:
-            st.info("ستظهر النسخة المعدلة هنا.")
-
+            st.info("ستظهر النسخة البشرية هنا بعد المعالجة.")
 
 if __name__ == "__main__":
     if "done" not in st.session_state:
         st.session_state.done = False
-    if "result" not in st.session_state:
-        st.session_state.result = ""
+    if "revised" not in st.session_state:
+        st.session_state.revised = ""
     if "original" not in st.session_state:
         st.session_state.original = ""
     main()
